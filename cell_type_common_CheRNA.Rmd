@@ -1,0 +1,453 @@
+---
+title: "common_specific"
+author: "Yan"
+date: "2021/12/28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+
+
+cheRNA_list <- list(A549_I = results_A549_I$gene_symbol[results_A549_I$direction=="Chr"] %>% na.omit(),
+                    A549_M = results_A549_M$gene_symbol[results_A549_M$direction=="Chr"] %>% na.omit(),
+                    HelaS3_I = results_HeLa_I$gene_symbol[results_HeLa_I$direction=="Chr"] %>% na.omit(),
+                    HelaS3_M = results_HeLa_M$gene_symbol[results_HeLa_M$direction=="Chr"] %>% na.omit())
+library(UpSetR)
+
+results_A549_I <- type.convert(results_A549_I,as.is=T)
+
+p <- UpSetR::upset(fromList(cheRNA_list),order.by = "freq") 
+cheRNA_list.2 <- VennDiagram::calculate.overlap(cheRNA_list)
+
+x <- names(cheRNA_list.2)[1]
+merged.cheRNA.class <- lapply(names(cheRNA_list.2),function(x){
+  cheRNA <- cheRNA_list.2[[x]]
+  
+  res <- data.frame(symbol=cheRNA) %>% type.convert(as.is=T) %>% 
+    mutate(class=rep(x,length(cheRNA)),
+           BaseMean_A549_I = hash(key = results_A549_I$gene_symbol,value = results_A549_I$baseMean)[symbol],
+           logFC_A549_I = hash(key = results_A549_I$gene_symbol,value = results_A549_I$log2FoldChange)[symbol],
+           direction_A549_I = hash(key = results_A549_I$gene_symbol,value = results_A549_I$direction)[symbol],
+           BaseMean_A549_M = hash(key = results_A549_M$gene_symbol,value = results_A549_M$baseMean)[symbol],
+           logFC_A549_M = hash(key = results_A549_M$gene_symbol,value = results_A549_M$log2FoldChange)[symbol],
+           direction_A549_M = hash(key = results_A549_M$gene_symbol,value = results_A549_M$direction)[symbol],
+           BaseMean_HeLa_I = hash(key = results_HeLa_I$gene_symbol,value = results_HeLa_I$baseMean)[symbol],
+           logFC_HeLa_I = hash(key = results_HeLa_I$gene_symbol,value = results_HeLa_I$log2FoldChange)[symbol],
+           direction_HeLa_I = hash(key = results_HeLa_I$gene_symbol,value = results_HeLa_I$direction)[symbol],
+           BaseMean_HeLa_M = hash(key = results_HeLa_M$gene_symbol,value = results_HeLa_M$baseMean)[symbol],
+           logFC_HeLa_M = hash(key = results_HeLa_M$gene_symbol,value = results_HeLa_M$log2FoldChange)[symbol],
+           direction_HeLa_M = hash(key = results_HeLa_M$gene_symbol,value = results_HeLa_M$direction)[symbol]
+                    
+           )
+
+}) %>% bind_rows() 
+
+
+class.a <- data.frame(cluster=c("a6","a12","a5","a7","a11","a4","a2","a15","a10","a13","a8","a3","a1","a9","a14"),
+                      cols=c("#035ded",rep("#4f94e8",4),rep("#98bee5",6),rep("#d5dce2",4))) %>% type.convert(as.is=T) %>% 
+  mutate(group=paste0("g",01:15))
+
+
+
+
+gdata <- merged.cheRNA.class %>% reshape2::melt(id.vars=c("class","symbol"),measure.vars=c("BaseMean_A549_I","BaseMean_A549_M","BaseMean_HeLa_I","BaseMean_HeLa_M"),variable.name="cell_phase",value.name="basemean")
+
+
+p <- ggplot(gdata,aes_string("class","basemean"))+
+  geom_violin(aes(color=class))+
+  #geom_jitter(size=0.5)+
+  #geom_dotplot(binaxis = "y",width = 0.2,stackdir = "center",binwidth = 0.1)+
+  geom_boxplot(aes(fill=class),width=0.2,outlier.shape = NA)+
+  ggsignif::geom_signif(comparisons = list(c("a6", "a2"),
+                                 c("a6", "a15")),step_increase = 0.1,test = 'wilcox.test')+
+  facet_grid(cell_phase~.)+
+  scale_y_log10()+
+  scale_x_discrete(limits=class.a$cluster)+
+  scale_color_manual(values = hash(key =class.a$cluster,value =  class.a$cols))+
+  scale_fill_manual(values = hash(key =class.a$cluster,value =  class.a$cols))+
+  theme_classic()
+  
+pdf("figures/common_CAR.baseMean.pdf",useDingbats = F,height = 12)
+print(p)
+dev.off()
+
+
+
+gdata <- merged.cheRNA.class %>% reshape2::melt(id.vars=c("class","symbol"),measure.vars=c("logFC_A549_I","logFC_A549_M","logFC_HeLa_I","logFC_HeLa_M"),variable.name="cell_phase",value.name="logFC")
+
+
+p <- ggplot(gdata,aes_string("class","logFC"))+
+  geom_violin(aes(color=class))+
+  #geom_jitter(size=0.5)+
+  #geom_dotplot(binaxis = "y",width = 0.2,stackdir = "center",binwidth = 0.1)+
+  geom_boxplot(aes(fill=class),width=0.2,outlier.shape = NA)+
+  ggsignif::geom_signif(comparisons = list(c("a6", "a2"),
+                                 c("a6", "a15")),step_increase = 0.1,test = 'wilcox.test')+
+  facet_grid(cell_phase~.)+
+ 
+  scale_x_discrete(limits=class.a$cluster)+
+  scale_color_manual(values = hash(key =class.a$cluster,value =  class.a$cols))+
+  scale_fill_manual(values = hash(key =class.a$cluster,value =  class.a$cols))+
+  theme_classic()
+  
+pdf("figures/common_CAR.logFC.pdf",useDingbats = F,height = 12)
+print(p)
+dev.off()
+
+
+```
+
+
+```{r}
+Com_Specifc_CheRNA <- list(shared=cheRNA_list.2$a6,
+                           A549_specific=cheRNA_list.2$a15,
+                           HeLaS3_specific=cheRNA_list.2$a2
+                           )
+
+saveRDS(Com_Specifc_CheRNA,file = "result/Com_Specifc_CheRNA.rds")
+
+
+
+```
+
+
+
+```{r enrich RNA type}
+
+HGNC<- data.table::fread("resource/hgnc_complete_set.txt")
+
+
+
+### enrich in RNA locus group
+
+com_spefic_type <- lapply(names(Com_Specifc_CheRNA),function(x){
+
+  
+  data <- data.frame(symbol = Com_Specifc_CheRNA[[x]]) %>% type.convert(as.is=T) %>% 
+  
+   mutate(locus_group=hash(key = HGNC$symbol,value = HGNC$locus_group)[symbol],
+          locus_type=hash(key = HGNC$symbol,value = HGNC$locus_type)[symbol],
+          class=x)
+  data$locus_group[is.na(data$locus_group)] <- "unknown"
+  data$locus_type[is.na(data$locus_type)] <- "unknown"
+  
+  return(data)
+  
+}) %>% bind_rows() %>% as.data.frame()
+
+
+com_spefic_type.count <- com_spefic_type %>% dplyr::count(symbol,locus_type,class) %>% type.convert()
+
+cols_type <- data.frame(locus_type=levels (com_spefic_type.count$locus_type)) %>% 
+  mutate(cols=rainbow(n = nrow(cols_type),s=0.6,v=0.8)) %>% type.convert(as.is=T)
+
+p.list <- lapply(levels(com_spefic_type.count$class),function(x){
+  gdata <- com_spefic_type.count %>% dplyr::filter(class==x)
+  p <- ggplot(gdata,aes(locus_type,symbol,fill=locus_type))+
+    geom_tile()+
+    scale_fill_manual(values = hash(key = cols_type$locus_type,value = cols_type$cols))+
+    labs(title = x)+
+    theme_bw()
+})
+
+pdf("figures/RNA type of com_specific cheRNAs.pdf",width = 12)
+
+ggpubr::ggarrange(plotlist = p.list,ncol  = 3)
+dev.off()
+
+
+
+```
+
+
+```{r compare baseMean and logFC}
+
+com_spefic_type.logFC <- com_spefic_type %>% 
+  mutate(
+         logFC_A549_I=hash(key = results_A549_I$gene_symbol,value = results_A549_I$log2FoldChange)[symbol],
+         logFC_A549_M=hash(key = results_A549_M$gene_symbol,value = results_A549_M$log2FoldChange)[symbol],
+         logFC_HeLaS3_I=hash(key = results_HeLa_I$gene_symbol,value = results_HeLa_I$log2FoldChange)[symbol],
+         logFC_HeLaS3_M=hash(key = results_HeLa_M$gene_symbol,value = results_HeLa_M$log2FoldChange)[symbol]
+         )
+
+com_spefic_type.basemean <- com_spefic_type %>% 
+  mutate(BaseMean_A549=log10(1+0.5*hash(key = results_A549_I$gene_symbol,value = results_A549_I$baseMean)[symbol]+
+                               0.5*hash(key = results_A549_M$gene_symbol,value = results_A549_M$baseMean)[symbol]),
+         
+         BaseMean_HeLaS3=log10(1+0.5*hash(key = results_HeLa_I$gene_symbol,value = results_HeLa_I$baseMean)[symbol]+
+                                 0.5*hash(key = results_HeLa_M$gene_symbol,value = results_HeLa_M$baseMean)[symbol]))
+
+
+
+x <- levels(com_spefic_type.count$class)[1]
+
+p.list <- lapply(levels(com_spefic_type.count$class),function(x){
+  gdata <- com_spefic_type.logFC %>% dplyr::filter(class==x) %>% reshape2::melt(id.vars=c("symbol","locus_group","locus_type","class")) %>%
+    mutate(cols=hash(key = cols_type$locus_type,value = cols_type$cols)[locus_type])
+
+  
+  p <- ggplot(gdata,aes(x=value,y=symbol))+
+    geom_errorbarh(aes(xmin=0,xmax=value,color=value))+
+    scale_color_gradient2(low = "#33ff00",high = "#0033ff",mid = "#000000",midpoint = 0,name="logFC")+
+    facet_grid(.~variable)+
+    labs(title = x)+
+    theme_bw()+theme(axis.text.y = element_text(colour =hash(key = gdata$symbol,value = gdata$cols)))
+})
+
+
+pdf("figures/RNA type of com_specific cheRNAs_logFC.pdf",width = 12)
+
+ggpubr::ggarrange(plotlist = p.list,ncol  = 3)
+dev.off()
+
+x<- levels(com_spefic_type.count$class)[3]
+
+p.list <- lapply(levels(com_spefic_type.count$class),function(x){
+  gdata <- com_spefic_type.basemean %>% dplyr::filter(class==x) %>% reshape2::melt(id.vars=c("symbol","locus_group","locus_type","class")) %>% type.convert(as.is=T) %>% 
+    mutate(cols=hash(key = cols_type$locus_type,value = cols_type$cols)[locus_type]) %>% type.convert(as.is=T)
+
+  library(forcats)
+  p <- ggplot(gdata,aes(x=value,y=fct_reorder(symbol,value)))+
+    geom_errorbarh(aes(xmin=0,xmax=value,color=value))+
+    scale_color_gradient2(low = "#ffffff",high = "#0033ff",name="log10 BaseMean",limits=c(0,7))+
+    facet_grid(.~variable)+
+    scale_x_continuous(limits = c(0,7))+
+    labs(title = x)+
+    theme_bw()
+})
+
+
+pdf("figures/RNA type of com_specific cheRNAs_baseMean.pdf",width = 12)
+ggpubr::ggarrange(plotlist = p.list,ncol  = 3)
+dev.off()
+
+
+
+```
+
+
+
+
+### GRID cheRNA target in HeLaS3  nascent expression
+```{r}
+A549.cheRNA.GRID <- data.table::fread("grid/A549.cheRNA.GRID.net.edge.csv",stringsAsFactors = F)
+HeLa.cheRNA.GRID <- data.table::fread("grid/HeLa.cheRNA.GRID.net.edge.csv",stringsAsFactors = F)
+
+cheRNA.GRID <- rbind(A549.cheRNA.GRID,HeLa.cheRNA.GRID) %>% unique.data.frame()
+
+
+com_spefic_GRID.target<- lapply(names(Com_Specifc_CheRNA),function(x){
+  
+  symbol=Com_Specifc_CheRNA[[x]]
+
+  data <- cheRNA.GRID[,c(1,3)] %>% dplyr::filter(Source %in% symbol)
+  
+  if (nrow(data)>0){
+    data <- data%>% mutate(class=x)
+  }
+  else{
+    data<- NULL
+  }
+
+}) %>% bind_rows() %>% as.data.frame()
+
+data.table::fwrite(file = "result/com_spefic_GRID.target.gz",x = com_spefic_GRID.target,sep = "\t")
+
+```
+
+```{r plot network}
+library(network)
+library(ggnetwork)
+library(tidyverse)
+library(tibble)
+
+edge_list <- tibble(from = com_spefic_GRID.target$Source, to =com_spefic_GRID.target$Target)
+network <- network(edge_list,  matrix.type = "edgelist", ignore.eval = FALSE)
+network %v% "degree" <- sna::degree(network)
+
+nodes <-  network$val %>% bind_rows()
+
+nodes$class <- hash(key = com_spefic_GRID.target$Source,com_spefic_GRID.target$class)[nodes$vertex.names] 
+
+network %v% "type" <- nodes$class
+
+network %e% "class" <- com_spefic_GRID.target$class %>% as.character() 
+
+network %v% "name" <- network %v% "vertex.names"
+
+p<- ggplot(ggnetwork(network), aes(x = x, y = y, xend = xend, yend = yend)) +
+  geom_edges(aes(color=class),curvature = 0.25)+
+  geom_nodes(aes(color=type,size=degree))+
+  geom_nodetext_repel(aes(color = class,label = ifelse(degree>10,as.character(vertex.names),"")))+
+  theme_blank()
+
+
+pdf("figures/test.pdf",useDingbats = F)
+print(p)
+dev.off()
+```
+
+
+
+
+# MARGI target
+```{r import MARGI gene associations}
+A549.cheRNA.diMARGI_H9 <- data.table::fread("margi/A549.cheRNA.diMARGI_H9.net.edge.csv")
+A549.cheRNA.diMARGI_H9.inter <- A549.cheRNA.diMARGI_H9 %>% filter(Source != Target)
+
+A549.cheRNA.diMARGI_HEK <- data.table::fread("margi/A549.cheRNA.diMARGI_HEK.net.edge.csv")
+A549.cheRNA.diMARGI_HEK.inter <- A549.cheRNA.diMARGI_HEK %>% filter(Source != Target)
+
+HeLa.cheRNA.diMARGI_H9 <- data.table::fread("margi/HeLa.cheRNA.diMARGI_H9.net.edge.csv")
+HeLa.cheRNA.diMARGI_H9.inter <- HeLa.cheRNA.diMARGI_H9 %>% filter(Source != Target)
+
+HeLa.cheRNA.diMARGI_HEK <- data.table::fread("margi/HeLa.cheRNA.diMARGI_HEK.net.edge.csv")
+HeLa.cheRNA.diMARGI_HEK.inter <- HeLa.cheRNA.diMARGI_HEK %>% filter(Source != Target)
+
+
+
+diMARGI.inter = list(A549_H9=A549.cheRNA.diMARGI_H9.inter,
+                     A549_HEK=A549.cheRNA.diMARGI_HEK.inter,
+                     HeLa_H9=HeLa.cheRNA.diMARGI_H9.inter,
+                     HeLa_HEK=HeLa.cheRNA.diMARGI_HEK.inter
+                     )
+
+
+cheRNA.MARGI <- rbind(
+rbind(A549.cheRNA.diMARGI_H9.inter,HeLa.cheRNA.diMARGI_H9.inter) %>% dplyr::count(Source,Target) %>% mutate(MARGI="H9"),
+rbind(A549.cheRNA.diMARGI_HEK.inter,HeLa.cheRNA.diMARGI_HEK.inter) %>% dplyr::count(Source,Target) %>% mutate(MARGI="HEK")
+) %>% as.data.frame()
+
+
+com_spefic_MARGI.target<- lapply(names(Com_Specifc_CheRNA),function(x){
+  
+  symbol=Com_Specifc_CheRNA[[x]]
+  
+  
+
+   data <-  cheRNA.MARGI %>% dplyr::filter(Source %in% symbol)
+  
+  if (nrow(data)>0){
+    data <- data%>% mutate(class=x)
+  }
+  else{
+    data<- NULL
+  }
+
+}) %>% bind_rows() %>% as.data.frame()
+
+data.table::fwrite(file = "result/com_spefic_MARGI.target.gz",x = com_spefic_MARGI.target,sep = "\t")
+
+
+
+```
+
+```{r clusterpofiler}
+
+com_spefic_MARGI.target <- data.table::fread("result/com_spefic_MARGI.target.gz")
+com_spefic_GRID.target <- data.table::fread("result/com_spefic_GRID.target.gz")
+
+library(clusterProfiler)
+
+library(org.Hs.eg.db)
+formula_res <- compareCluster(Target~class, data=com_spefic_MARGI.target, fun="enrichGO",
+                              keyType       = 'SYMBOL',
+                              OrgDb         = org.Hs.eg.db,
+                              ont           = "BP",
+                              pAdjustMethod = "BH",
+                              pvalueCutoff  = 1,
+                              qvalueCutoff  = 1)
+
+saveRDS(formula_res, file = "com_spefic_MARGI.target.GO.rds")
+formula_res <- compareCluster(Target~class, data=com_spefic_GRID.target, fun="enrichGO",
+                              keyType       = 'SYMBOL',
+                              OrgDb         = org.Hs.eg.db,
+                              ont           = "BP",
+                              pAdjustMethod = "BH",
+                              pvalueCutoff  = 1,
+                              qvalueCutoff  = 1)
+
+dotplot(formula_res)
+saveRDS(formula_res, file = "com_spefic_GRID.target.GO.rds")
+
+
+```
+
+
+## compare nascent RNA-seq
+```{r}
+
+
+NascentRNA <- data.table::fread("gene_count_matrix_NascentRNA.csv",sep = ",",stringsAsFactors = F)
+
+NascentRNA.rpm <- edgeR::cpm(NascentRNA[,2:5]) %>% as.data.frame() %>% mutate(symbol=NascentRNA$gene_id)
+
+
+NascentRNA.rpm <- NascentRNA.rpm %>% mutate(Mean_I = (SRR2149280+SRR2149281)/2,
+                                            Mean_M = (SRR2149282+SRR2149283)/2) %>% type.convert(as.is=T)
+
+#summary(NascentRNA.rpm)
+
+
+
+```
+
+```{r compare nascent transciption}
+
+
+com_spefic_GRID.target.Nas <- com_spefic_GRID.target %>% 
+   mutate(NascentRNA_I = log10(1+hash(key = NascentRNA.rpm$symbol,value = NascentRNA.rpm$Mean_I)[Target]), 
+         NascentRNA_M = log10(1+hash(key = NascentRNA.rpm$symbol,value = NascentRNA.rpm$Mean_M)[Target]))%>% na.omit()
+
+
+p.list <- lapply(c("NascentRNA_I","NascentRNA_M"),function(x){
+  
+    p <- ggplot(com_spefic_GRID.target.Nas,aes_string("class",x))+
+    geom_violin()+
+    geom_boxplot(width=0.2,aes(fill=class))+
+    ggsignif::geom_signif(comparisons = list(
+                                 c("shared", "HeLaS3_specific")),step_increase = 0.1,test = 'wilcox.test')+
+    scale_y_continuous(name = "normalized log10 expression")+
+    scale_x_discrete(limits=c("shared","HeLaS3_specific","A549_specific"))+
+    scale_color_manual(labels=NULL,guide=F)+
+    labs(title = paste0(x))+
+    theme_classic()
+
+})
+
+
+  pdf(paste0("figures/compare.NasRNA of com_spefic.GRID targets.pdf"),useDingbats = F)
+  ggpubr::ggarrange(plotlist = p.list,ncol = 2) %>% print()
+  dev.off()
+  
+
+com_spefic_MARGI.target.target.Nas <- com_spefic_MARGI.target %>% 
+   mutate(NascentRNA_I = log10(1+hash(key = NascentRNA.rpm$symbol,value = NascentRNA.rpm$Mean_I)[Target]), 
+         NascentRNA_M = log10(1+hash(key = NascentRNA.rpm$symbol,value = NascentRNA.rpm$Mean_M)[Target]))%>% na.omit()
+
+p.list <- lapply(c("NascentRNA_I","NascentRNA_M"),function(x){
+  
+    p <- ggplot(com_spefic_MARGI.target.target.Nas,aes_string("class",x))+
+    geom_violin()+
+    geom_boxplot(width=0.2,aes(fill=class))+
+    ggsignif::geom_signif(comparisons = list(
+                                 c("shared", "HeLaS3_specific"),c("shared", "A549_specific"),c("A549_specific", "HeLaS3_specific")),step_increase = 0.1,test = 'wilcox.test')+
+    scale_y_continuous(name = "normalized log10 expression")+
+    scale_x_discrete(limits=c("shared","HeLaS3_specific","A549_specific"))+
+    scale_color_manual(labels=NULL,guide=F)+
+    labs(title = paste0(x))+
+    theme_classic()
+
+})
+
+  pdf(paste0("figures/compare.NasRNA of com_spefic.MARGI targets.pdf"),useDingbats = F)
+  ggpubr::ggarrange(plotlist = p.list,ncol = 2) %>% print()
+  dev.off()
+
+```

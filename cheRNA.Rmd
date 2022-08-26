@@ -1,0 +1,1405 @@
+---
+title: "CAR"
+author: "Yan"
+date: "2021/12/7"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pdf.options(useDingbats=F)
+library(dplyr)
+
+# colors
+
+col_cell <- c("A549"="#1a8ce2","HelaS3"="#d8b021")
+
+
+col_direction <- c("Chr"="#0c8cf4","Soluble"="#8ecc7a","NC"="#cdcdcd")
+
+col_enrichment <- c("IM"="#4198ef","IO"="#94c5ed","MO"="#88b6ed") # BLUE 
+#col_enrichment <- c("IM"="#dc585e","IO"="#ebb4b2","MO"="#eacfb5") #orangne
+
+col_fraction <- c("S"="#8ecc7a","P"="#0c8cf4")
+
+
+col_sample <- c("IS"="#2278d6","MS"="#79abd1","IP"="#75d324","MP"="#a5ce7a")
+
+
+source(file = "functions.R")
+```
+
+
+
+
+```{r}
+
+gene_data<- data.table::fread("../hg38/gene_info.tsv",select =c(1,4:19))
+row.names(gene_data) <- gene_data$gene_id
+
+lib_info <- data.table::fread("../hg38/sample_info.txt") %>% mutate(condition=paste0(CellCycle,PS))
+
+```
+
+
+
+```{r statistics  for insert length}
+
+Insert.len <- lapply (
+  lib_info$Sample,
+  FUN = function(x) {
+  data <- data.table::fread(paste0("fq_stat/", x, ".fqLen.txt"),sep = "\t",select = c(1, 4))  %>% 
+    as.data.frame() %>% mutate(sample=x)
+}) %>% bind_rows() %>% as.data.frame()
+
+Insert.len.stat <- Insert.len %>% dplyr::group_by()
+
+pdf("figures/insert.length.pdf",useDingbats = F)
+ggplot(Insert.len,aes(V1,V4))+
+  geom_histogram(aes(fill=sample),stat = "identity",binwidth = 50)+
+  
+  scale_x_continuous(limits = c(0,300),name = "insert length")+
+  scale_y_continuous(name = "read count")+
+  theme_bw()
+dev.off()
+
+
+```
+
+
+
+
+
+
+
+```{r}
+source('functions.R')
+dir.create("dds_merged")
+length(row.names(gene_data))
+View(row.names(gene_data[1:10,]))
+
+make_deseq(cell = "A549",compare = c("IS","IP"),ddsName = "dds_merged/A549_I.dds")
+make_deseq(cell = "A549",compare = c("MS","MP"),ddsName = "dds_merged/A549_M.dds")
+
+make_deseq(cell = "HelaS3",compare = c("IS","IP"),ddsName = "dds_merged/HeLa_I.dds")
+make_deseq(cell = "HelaS3",compare = c("MS","MP"),ddsName = "dds_merged/HeLa_M.dds")
+dir.create("result")
+dir.create("result/deseq_merged")
+results_A549_I <-  get_DESeq_results(dds = "dds_merged/A549_I.dds",contrast =c("condition","IP","IS"),padj_cut = 0.05,log2FoldChange_cut=1,outdir="result/deseq_merged/",name="A549_I.gz")
+results_A549_M <-  get_DESeq_results(dds = "dds_merged/A549_M.dds",contrast =c("condition","MP","MS"),padj_cut = 0.05,log2FoldChange_cut=1,outdir="result/deseq_merged/",name="A549_M.gz")
+results_HeLa_I <-  get_DESeq_results(dds = "dds_merged/HeLa_I.dds",contrast =c("condition","IP","IS"),padj_cut = 0.05,log2FoldChange_cut=1,outdir="result/deseq_merged/",name="HeLa_I.gz")
+results_HeLa_M <-  get_DESeq_results(dds = "dds_merged/HeLa_M.dds",contrast =c("condition","MP","MS"),padj_cut = 0.05,log2FoldChange_cut=1,outdir="result/deseq_merged/",name="HeLa_M.gz")
+
+# load for 2nd re-use
+results_A549_I <- data.table::fread("result/deseq_merged/DESeqResult_A549_I.gz")
+results_A549_M <- data.table::fread("result/deseq_merged/DESeqResult_A549_M.gz")
+results_HeLa_I <- data.table::fread("result/deseq_merged/DESeqResult_HeLa_I.gz")
+results_HeLa_M <- data.table::fread("result/deseq_merged/DESeqResult_HeLa_M.gz")
+
+
+```
+
+
+upset plot
+```{r}
+cheRNA_list <- list(A549_I = results_A549_I$gene_symbol[results_A549_I$direction=="Chr"] %>% na.omit(),
+                    A549_M = results_A549_M$gene_symbol[results_A549_M$direction=="Chr"] %>% na.omit(),
+                    HelaS3_I = results_HeLa_I$gene_symbol[results_HeLa_I$direction=="Chr"] %>% na.omit(),
+                    HelaS3_M = results_HeLa_M$gene_symbol[results_HeLa_M$direction=="Chr"] %>% na.omit())
+library(UpSetR)
+
+dir.create("figures")
+pdf("figures/upset_cheRNA.test.pdf",useDingbats = F)
+p <- UpSetR::upset(fromList(cheRNA_list),order.by = c("freq","degree"),decreasing=c(T,T)) %>% print()
+dev.off()
+
+saveRDS(object =cheRNA_list,file = "result/cheRNA_list.rds" )
+cheRNA_list <- readRDS("result/cheRNA_list.rds")
+```
+
+
+
+```{r}
+library(UpSetR)
+Venn.diagram2(x=list(A549_I_cheRNA = results_A549_I$gene_symbol[results_A549_I$direction=="Chr"] %>% na.omit(),
+                    A549_M_cheRNA = results_A549_M$gene_symbol[results_A549_M$direction=="Chr"] %>% na.omit()),filename = "figures/venn_A549.cheRNA.pdf")
+
+
+Venn.diagram2(x=list(HelaS3_I = results_HeLa_I$gene_symbol[results_HeLa_I$direction=="Chr"] %>% na.omit(),
+                    HelaS3_M = results_HeLa_M$gene_symbol[results_HeLa_M$direction=="Chr"] %>% na.omit()),filename = "figures/venn_HeLaS3.cheRNA.pdf")
+
+```
+
+
+
+volcano plot
+```{r}
+plot_volcano <- function(data=results_A549_I,sample="A549",phase="I"){
+  library(ggplot2)
+
+  p <- ggplot(data,aes(baseMean,log2FoldChange,color=direction))+
+    geom_point()+
+    scale_color_manual(values = col_direction)+
+    scale_x_log10()+
+    labs(title = paste(sample,phase,sep = ":"))+
+    theme_bw()
+  
+  pdf( paste0("figures/","baseMean_fc_",sample,"_",phase,".pdf"))
+  p %>% print()
+  dev.off()
+}
+
+plot_volcano(data=results_A549_I,sample="A549",phase="I")
+plot_volcano(data=results_A549_M,sample="A549",phase="M")
+plot_volcano(data=results_HeLa_I,sample="HeLa",phase="I")
+plot_volcano(data=results_HeLa_M,sample="HeLa",phase="M")
+```
+
+
+```{r}
+
+plot_correlation_logFC <- function(data1=results_A549_I,data2=results_A549_M,name1="A549_I",name2="A549_M"){
+  library(ggplot2)
+
+  gdata <- rbind(data.frame(log2FoldChange=data1$log2FoldChange,gene_symbol=data1$gene_symbol,name=name1),
+                 data.frame(log2FoldChange=data2$log2FoldChange,gene_symbol=data2$gene_symbol,name=name2) )
+  gdata <- gdata %>% reshape2::dcast(gene_symbol~name,value.var = "log2FoldChange") 
+  direction <- hash(key = data1$gene_symbol,value = data1$direction)
+#  symbol <- hash(key = annotation$qry_gene_id,value =annotation$refgene)
+ # gdata <- gdata %>% mutate(direction=direction[as.character(gdata$gene_id)],symbol=symbol[as.character(gdata$gene_id)])
+  gdata <- gdata %>% mutate(direction=direction[as.character(gdata$gene_symbol)]) %>% na.omit()
+  formula <- y ~ poly(x, 1, raw = TRUE)
+  p <- ggplot(gdata,aes_string(name1,name2))+
+    geom_point(aes(color=direction))+
+    stat_smooth( method = "lm", formula = formula) +
+    geom_abline(intercept = 0,slope = 1,aes(alpha=0.5))+
+    ggpubr::stat_cor(method="pearson")+
+    scale_color_manual(values = col_direction)+
+  #  geom_text(aes(label = ifelse(symbol=="RMRP",symbol,""),color=direction))+
+    lims(x=c(-10,10),y=c(-10,10))+
+    theme_bw()
+  
+  
+  pdf( paste0("figures/","correlation_",name1,"_",name2,".pdf"),useDingbats = F)
+  print(p)
+  dev.off()
+}
+
+plot_correlation_logFC(data1=results_A549_I,data2=results_A549_M,name1="A549_I",name2="A549_M")
+plot_correlation_logFC(data1=results_HeLa_I,data2=results_HeLa_M,name1="HeLa_I",name2="HeLa_M")
+```
+
+
+
+```{r}
+
+COR <- gene_data[,2:17] %>% na.omit() %>% edgeR::cpm() %>% +1 %>% log2() %>% cor()
+
+ANNO_COL <- data.frame(CellType=lib_info$CellType,condition=lib_info$condition,fraction=lib_info$PS,row.names = row.names(COR))
+pheatmap::pheatmap(COR,annotation_row = ANNO_COL,annotation_col = ANNO_COL,annotation_colors = list(condition=col_sample,CellType=col_cell,faction=col_fraction),filename = "figures/whole.heatmap_nolable.pdf",cellwidth = 12,cellheight = 12,height = 8,width = 8)
+
+```
+
+
+```{r}
+heatmap_data <- function(data1=results_A549_I,data2=results_A549_M,filename = "figs/pheatmap.A549.pdf"){
+  A549 <- rbind(data1 %>% mutate(phase="I"),
+                data2 %>% mutate(phase="M"))
+
+A549 <- A549 %>% data.table::as.data.table() %>% data.table::dcast.data.table(gene_symbol~phase,value.var = "direction") %>% dplyr::filter(I =="Chr" | M == "Chr")  %>% na.omit() %>% dplyr::filter(I !="" & M != "")
+
+A549.data <- gene_data %>% dplyr::filter(gene_id %in% A549$gene_symbol) %>%  mutate(gene_symbol=gene_id)
+
+mat <- A549.data[,2:17] 
+anno_row <- data.frame(
+                       I=hash(key = A549$gene_symbol,value = A549$I)[A549.data$gene_symbol],
+                       M=hash(key = A549$gene_symbol,value = A549$M)[A549.data$gene_symbol],row.names = A549.data$gene_symbol
+                        )
+anno_col <- data.frame(BC=colnames(mat),Cell=lib_info$CellType,Fraction=lib_info$PS)
+
+row.names(anno_col) <- colnames(mat)
+row.names(anno_row) <- row.names(mat) <-  A549.data$gene_symbol
+
+pheatmap::pheatmap(mat,annotation_col = anno_col[,2:3],scale = "row",show_rownames = F,annotation_row = anno_row,
+                   filename = filename,
+                   annotation_colors = list(Fraction=col_fraction,I=col_direction,M=col_direction) )
+
+}
+
+heatmap_data(data1=results_A549_I,data2=results_A549_M,filename = "figures/pheatmap.A549.pdf")
+heatmap_data(data1=results_HeLa_I,data2=results_HeLa_M,filename = "figures/pheatmap.HeLa.pdf")
+```
+
+
+
+
+```{r}
+setwd('/Volumes/Seagate/CAR/DESEQ/')
+source('functions.R')
+source("parameters_options.R")
+```
+
+
+```{r}
+# gene information
+
+bed <- data.table::fread("resource/gencode.v33.bed")
+colnames(bed)[1:12] <- c("chr","start","end","name","score","strand","thickStart","thickEnd","itemRgb","blockCount","blockSizes","blockStarts")
+
+bed <- bed %>% mutate(gene_symbol=data.table::fread("resource/gencode.v33.gene.name.txt",header = F)$V1)
+gene.list <- union_all(results_A549_I$gene_symbol,results_A549_M$gene_symbol,results_HeLa_I$gene_symbol,results_HeLa_M$gene_symbol) %>% unique.Vector()
+genes <- levels(factor(bed$gene_symbol))
+
+merged.hg38.bed <- lapply(genes,function(x){
+  r <- bed %>% dplyr::filter(gene_symbol == x)
+  res <- r[1,]
+}) %>% bind_rows() %>% as.data.frame()
+
+data.table::fwrite(merged.hg38.bed,file = "resource/merged.hg38.bed",sep = "\t")
+merged.hg38.bed <- data.table::fread("resource/merged.hg38.bed",sep = "\t")
+
+merged.hg38.bed <- merged.hg38.bed  %>% mutate(tx_len = data.table::fread("resource/merged.hg38.txlen.txt")$V1)
+gene.list.table <- merged.hg38.bed %>% dplyr::filter(gene_symbol %in% gene.list)
+data.table::fwrite(gene.list.table,file = "resource/merged.expressed.hg38.bed",sep = "\t")
+gene.list.table <- data.table::fread("resource/merged.expressed.hg38.bed",sep = "\t")
+```
+
+
+```{r compare exonCount}
+
+plot_exonCount <- function(name){
+  
+  data <- X[[name]] %>% subset.data.frame(select = c("gene_symbol","direction"))
+  data <- data %>% mutate(exonCount = hash(key = gene.list.table$gene_symbol,value = gene.list.table$blockCount)[as.character(data$gene_symbol)])
+  
+  p <- ggplot(data,aes(exonCount,color=direction))+
+  stat_ecdf()+
+  scale_color_manual(values = col_direction)+
+  scale_x_continuous(limits=c(1,100))+
+  theme_bw()+theme(title = name)
+
+}
+
+X <- list(A549_I = results_A549_I,
+          A549_M = results_A549_M,
+          HeLa_I = results_HeLa_I,
+          HeLa_M = results_HeLa_M)
+
+p.list <- lapply(X, plot_exonCount)
+
+pdf("figures/ExonCount_compare.pdf")
+ggpubr::ggarrange(plotlist = p.list,ncol = 2,nrow = 2,common.legend = T)
+dev.off()
+
+
+p <- kruskal.test(data=A549_I,direction~exonCount)
+t <- wilcox.test(x=data$exonCount[data$direction=="Chr"],y=data$exonCount[data$direction=="NC"])
+
+
+
+stat_exonCount <- function(name){
+  
+  data <- X[[name]] %>% subset.data.frame(select = c("gene_symbol","direction"))
+  data <- data %>% mutate(exonCount = hash(key = gene.list.table$gene_symbol,value = gene.list.table$blockCount)[as.character(data$gene_symbol)]) %>% na.omit() %>% as.data.frame()
+  data.agr <- data %>% group_by(direction) %>% summarise(median=median(exonCount))
+
+  p.Ks <- kruskal.test(data,direction~exonCount)
+
+lapply(c("Chr","Soluble","NC"),function(x){
+  data.i <- data %>% dplyr::filter(direction %in% c(x,"NC")) %>% na.omit() 
+  p.Wilcox <- wilcox.test(x=data.i$exonCount[data.i$direction==x],y=data.i$exonCount[data.i$direction=="NC"])
+
+  res <- data.frame(direction=x,median =data.agr$median[data.agr$direction==x], W = p.Wilcox$statistic, P = p.Wilcox$p.value)
+}) %>% bind_rows() %>% as.data.frame()
+  
+}
+
+s <- stat_exonCount(name = "A549_I")
+
+s <- stat_exonCount(name = "HeLa_I")
+```
+
+
+```{r compare tx_length}
+
+
+plot_Txlen <- function(name){
+  
+  data <- X[[name]] %>% subset.data.frame(select = c("gene_symbol","direction"))
+  data <- data %>% mutate(tx_len = hash(key = gene.list.table$gene_symbol,value = gene.list.table$tx_len)[as.character(data$gene_symbol)])
+  
+  p <- ggplot(data,aes(tx_len,color=direction))+
+  geom_density()+
+  scale_color_manual(values = col_direction)+
+  scale_x_continuous(trans = "log10")+
+  theme_bw()+labs(title = name)
+
+}
+
+X <- list(A549_I = results_A549_I,
+          A549_M = results_A549_M,
+          HeLa_I = results_HeLa_I,
+          HeLa_M = results_HeLa_M)
+
+
+
+p.list <- lapply(names(X), plot_Txlen)
+
+pdf("figures/TxLen_compare.pdf")
+ggpubr::ggarrange(plotlist = p.list,ncol = 2,nrow = 2,common.legend = T)
+dev.off()
+
+```
+
+
+```{r}
+A549_cheRNA <- list(IO = setdiff(cheRNA_list$A549_I,cheRNA_list$A549_M) %>% unique(),
+                    MO = setdiff(cheRNA_list$A549_M,cheRNA_list$A549_I) %>% unique(),
+                    IM = intersect(cheRNA_list$A549_I,cheRNA_list$A549_M) %>% unique()
+                    )
+
+HeLa_cheRNA <- list(IO = setdiff(cheRNA_list$HelaS3_I,cheRNA_list$HelaS3_M) %>% unique(),
+                    MO = setdiff(cheRNA_list$HelaS3_M,cheRNA_list$HelaS3_I) %>% unique(),
+                    IM = intersect(cheRNA_list$HelaS3_I,cheRNA_list$HelaS3_M) %>% unique()
+                    )
+
+
+Txlens_A549 <- lapply(c("IO","MO","IM"),function(x){
+
+ need <- A549_cheRNA[[x]]
+  
+  data <- merged.hg38.bed %>% dplyr::filter(gene_symbol %in% need) %>% mutate(enrich_type=x)
+  
+  data <- data %>% mutate(tx_len = hash(key = gene.list.table$gene_symbol,value = gene.list.table$tx_len)[as.character(data$gene_symbol)])
+  
+}) %>% bind_rows() %>% as.data.frame()
+  
+  
+Txlens_HeLa <- lapply(c("IO","MO","IM"),function(x){
+
+ need <- HeLa_cheRNA[[x]]
+  
+  data <- merged.hg38.bed %>% dplyr::filter(gene_symbol %in% need) %>% mutate(enrich_type=x)
+  
+  data <- data %>% mutate(tx_len = hash(key = gene.list.table$gene_symbol,value = gene.list.table$tx_len)[as.character(data$gene_symbol)])
+  
+}) %>% bind_rows() %>% as.data.frame()
+
+
+  p.list <- lapply(list(A549=Txlens_A549 ,HelaS3=Txlens_HeLa),function(x){
+    p <- ggplot(x,aes(tx_len,color=enrich_type))+
+  geom_density()+
+  #scale_color_manual(values = col_enrichment)+
+  scale_x_continuous(trans = "log10")+
+  theme_bw()
+  }) 
+
+pdf("figures/TxLen_compare_cheRNA.pdf")
+ggpubr::ggarrange(plotlist = p.list,nrow = 2)
+dev.off()
+```
+
+```{r enrich RNA type}
+
+HGNC<- data.table::fread("resource/hgnc_complete_set.txt")
+
+Anno_gene_HGNC <- function(data=results_A549_I,...){
+
+  # from symbol to locus_group using HGNC 
+  data <- data %>% mutate(locus_group=hash(key = HGNC$symbol,value = HGNC$locus_group)[as.character(data$gene_symbol)],
+                          locus_type=hash(key = HGNC$symbol,value = HGNC$locus_type)[as.character(data$gene_symbol)]
+                          )
+  data$locus_group[is.na(data$locus_group)] <- "unknown"
+  data$locus_type[is.na(data$locus_type)] <- "unknown"
+  
+  return(data)
+}
+
+
+Count_locus_group <- function(data=results_A549_I,title="A549_I",fill="locus_group",...){
+  data <- data %>% Anno_gene_HGNC(data = data)
+  
+  Count <- data %>% dplyr::count(direction,locus_group) %>% na.omit()
+  
+  p <- ggplot(Count,aes_string(x="direction",y = "n",fill=fill))+
+    geom_bar(stat = "identity",position = "fill")+
+    scale_x_discrete(name = "nuclear fraction enrichment")+
+    scale_y_continuous(name = "porpotion")+
+    labs(title = title)+
+    theme_bw()
+
+}
+
+Count_locus_type <- function(data=results_A549_I,title="A549_I",fill="locus_type",...){
+  data <- data %>% Anno_gene_HGNC(data = data)
+  
+  Count <- data %>% dplyr::count(direction,locus_type) %>% na.omit()
+  
+  p <- ggplot(Count,aes_string(x="direction",y = "n",fill=fill))+
+    geom_bar(stat = "identity",position = "fill")+
+    scale_x_discrete(name = "nuclear fraction enrichment")+
+    scale_y_continuous(name = "porpotion")+
+    labs(title = title)+
+    theme_bw()
+
+}
+
+
+deresults <- list(A549_I=results_A549_I,
+                  A549_M=results_A549_M,
+                  HeLa_I=results_HeLa_I,
+                  HeLa_M=results_HeLa_M)
+
+### enrich in RNA locus group
+
+{
+p.list <- lapply(names(deresults),function(x){
+  p <- Count_locus_group(data=deresults[[x]],title=x,HGNC=HGNC) 
+})
+
+
+pdf("figures/RNA type enrichment.pdf")
+ggpubr::ggarrange(plotlist = p.list,ncol = 2,nrow=2,common.legend = T)
+dev.off()
+
+# fisher hyper test
+lapply(names(deresults),function(x){
+otest= odds.test(data =deresults[[x]] %>% Anno_gene_HGNC () %>% dplyr::count(direction,locus_group) %>% na.omit(), group="direction",term="locus_group")
+data.table::fwrite(otest,file = paste0("result/statistics/RNAType_",x,".enrich.test.txt"),sep = "\t")
+})
+
+
+A549_cheRNA_type <- lapply(names(A549_cheRNA),function(x){
+  data <- data.frame(gene_symbol=A549_cheRNA[[x]]) %>% mutate(direction=x) %>% Anno_gene_HGNC() %>% type.convert(as.is=T)
+  
+}) %>% bind_rows() %>% as.data.frame()
+
+
+HeLa_cheRNA_type <- lapply(names(HeLa_cheRNA),function(x){
+  data <- data.frame(gene_symbol=HeLa_cheRNA[[x]]) %>% mutate(direction=x) %>% Anno_gene_HGNC() %>% type.convert(as.is=T)
+  
+}) %>% bind_rows() %>% as.data.frame()
+
+
+pdf("figures/RNA type cheRNA A549.pdf")
+Count_locus_group(data=A549_cheRNA_type,title="A549_cheRNA",HGNC=HGNC) %>% print()
+dev.off()
+
+
+pdf("figures/RNA type cheRNA HeLa.pdf")
+Count_locus_group(data=HeLa_cheRNA_type,title="HeLa_cheRNA",HGNC=HGNC) %>% print()
+dev.off()
+
+pdf("figures/RNA Locus_type cheRNA A549.pdf")
+Count_locus_type(data=A549_cheRNA_type,title="A549_cheRNA",HGNC=HGNC,fill = "locus_type") %>% print()
+dev.off()
+
+
+pdf("figures/RNA Locus_type cheRNA HeLa.pdf")
+Count_locus_type(data=HeLa_cheRNA_type,title="HeLa_cheRNA",HGNC=HGNC,fill = "locus_type") %>% print()
+dev.off()
+
+
+# fisher hyper test
+cheRNA_type <- list(A549=A549_cheRNA_type,HeLa=HeLa_cheRNA_type)
+lapply(names(cheRNA_type),function(x){
+otest= odds.test(data =cheRNA_type[[x]] %>% Anno_gene_HGNC () %>% dplyr::count(direction,locus_group) %>% na.omit(), group="direction",term="locus_group")
+data.table::fwrite(otest,file = paste0("result/statistics/RNAType_",x,"cheRNA.enrich.test.txt"),sep = "\t")
+})
+
+}
+
+
+
+### enrich in RNA locus type
+
+{
+  
+  Count_locus_type <- function(data=results_A549_I,sample="A549_I",...){
+    data <- data %>% Anno_gene_HGNC(data = data)
+    
+    Count <- data %>% dplyr::count(direction,locus_type) %>% na.omit() %>% mutate(sample=sample)
+
+  }
+  
+locus_type <- lapply(names(deresults),function(x){
+  data <- deresults[[x]] %>% Anno_gene_HGNC()
+
+  otest= odds.test(data =data  %>% dplyr::count(direction,locus_type) %>% na.omit(), group="direction",term="locus_type") %>% 
+    mutate(sample=x) %>% type.convert(as.is=T)
+  
+  return(otest)
+
+}) %>% bind_rows() %>% as.data.frame()
+
+p <- ggplot(locus_type %>% dplyr::filter(bonferroni < 0.05),aes(Group,Term))+
+  geom_tile(aes(fill=log(OR)))+
+  scale_fill_gradient2(midpoint = 0,low = "#33adff",high = "#ff3333",mid = "#000000")+
+  facet_grid(.~sample)+theme_bw()
+
+pdf("figures/RNA Locus_type enrichment_heatmap.pdf")
+print(p)
+dev.off()
+
+# for cheRNA
+
+
+locus_type <- lapply(names(cheRNA_type),function(x){
+  data <- cheRNA_type[[x]]
+
+  otest= odds.test(data =data  %>% dplyr::count(direction,locus_type) %>% na.omit(), group="direction",term="locus_type") %>% mutate(sample=x)
+  
+  return(otest)
+
+}) %>% bind_rows() %>% as.data.frame()
+
+
+p <- ggplot(locus_type %>% dplyr::filter(bonferroni < 0.05),aes(Group,Term))+
+  geom_tile(aes(fill=log(OR)))+
+  scale_fill_gradient2(midpoint = 0,low = "#33adff",high = "#ff3333",mid = "#000000")+
+  facet_grid(.~sample)+theme_bw()
+
+pdf("figures/cheRNA Locus_type enrichment_heatmap.pdf")
+print(p)
+dev.off()
+
+}
+
+```
+
+计算每个时期的染色体上不同富集RNA占总RNA的分数
+
+```{r proportion of cheRNA in chromatin}
+
+
+Ps.list <- list(A549=list(I=c("BC2","BC10"),
+                          M=c("BC4","BC12")),
+                HeLaS3=list(I=c("BC6","BC14"),
+                          M=c("BC8","BC16"))
+                )
+
+
+DESeqResults.list <- list(A549=list(I=results_A549_I,
+                                    M=results_A549_M),
+                          HeLaS3=list(I=results_HeLa_I,
+                                    M=results_HeLa_M))
+
+
+gene_data.merge <- lapply(names(Ps.list),function(x){
+  
+  p <- lapply(c("I","M"),function(y){
+    
+    anno <- DESeqResults.list[[x]][[y]] %>% type.convert(as.is=T)
+    
+    colsums <- subset.data.frame(x = gene_data,select = Ps.list[[x]][[y]]) %>% na.omit() %>% apply(MARGIN = 2,FUN = sum)
+    rpm <- subset.data.frame(x = gene_data,select = Ps.list[[x]][[y]])/colsums *1e6 
+    colnames(rpm) <- c("rep1","rep2")
+    rpm <- rpm %>% mutate(symbol=gene_data$gene_id,sample=y,cell=x,direction=hash(key = anno$gene_symbol,value = anno$direction)[symbol]) %>% na.omit()
+    
+    rpm.sum <- rpm %>% dplyr::group_by(cell,sample,direction) %>% summarise(rep1=sum(rep1),rep2=sum(rep2)) %>% na.omit()
+
+  }) %>% bind_rows() 
+
+}) %>% bind_rows() %>% as.data.frame()
+
+
+pdf("figures/fraction_P.pdf")
+ggplot(gene_data.merge,aes(sample,rep1+rep2,fill=factor(direction,levels = c("Soluble","NC","Chr"))))+
+  geom_bar(position = "fill",stat = "identity")+
+  facet_grid(.~cell)+
+  scale_fill_manual(values = col_direction,limits=c("Soluble","NC","Chr"),name=NULL)+
+  theme_bw()
+dev.off()
+
+gene_data$gene_id <- gene_data$gene_id %>% type.convert(as.is=T)
+
+gene_data.2 <- gene_data %>% na.omit() %>% type.convert(as.is=T)
+
+gene_data.proportion <- edgeR::cpm(gene_data.2[,2:17]) %>% as.data.frame()
+
+gene_data.proportion.2 <- data.frame(
+         A549_I = hash(results_A549_I$gene_symbol,results_A549_I$direction)[gene_data.2$gene_id],
+         A549_M = hash(results_A549_M$gene_symbol,results_A549_M$direction)[gene_data.2$gene_id],
+         HeLa_I = hash(results_HeLa_I$gene_symbol,results_HeLa_I$direction)[gene_data.2$gene_id],
+         HeLa_M = hash(results_HeLa_M$gene_symbol,results_HeLa_M$direction)[gene_data.2$gene_id]) %>% 
+ apply(MARGIN = c(1,2),FUN = function(x){
+  x <- ifelse(is.na(x),"filtered",x)
+}) %>% as.data.frame()
+
+gene_data.proportion.3 <- gene_data.proportion.2 %>% mutate(
+  symbol = gene_data.2$gene_id,
+  A549_IP =   (gene_data.proportion$BC2+gene_data.proportion$BC10)/2,
+  A549_MP =   (gene_data.proportion$BC4+gene_data.proportion$BC12)/2,
+  HeLaS3_IP = (gene_data.proportion$BC6+gene_data.proportion$BC14)/2,
+  HeLaS3_MP = (gene_data.proportion$BC8+gene_data.proportion$BC16)/2
+)
+
+gdata <- gene_data.proportion.3 %>% dplyr::group_by(A549_I,A549_M) %>% summarise(
+  A549_IP=signif(sum(A549_IP)/1e4,digits = 2),
+  A549_MP=signif(sum(A549_MP)/1e4,digits = 2)
+  )
+
+p1 <- ggplot(gdata,aes(A549_I,A549_M,fill= A549_IP))+
+  geom_tile()+
+  geom_text(mapping = aes(label=A549_IP))+
+  scale_fill_gradient(low = "#f0f9ff",high = "#1d99ff")+
+  theme_bw()
+
+
+p2 <- ggplot(gdata,aes(A549_I,A549_M,fill=A549_MP))+
+  geom_tile()+
+  geom_text(mapping = aes(label=A549_MP))+
+  scale_fill_gradient(low = "#f0f9ff",high = "#1d99ff")+
+  theme_bw()
+
+gdata <- gene_data.proportion.3 %>% dplyr::group_by(HeLa_I,HeLa_M) %>% summarise(
+  HeLaS3_IP=signif(sum(HeLaS3_IP)/1e4,digits = 2),
+  HeLaS3_MP=signif(sum(HeLaS3_MP)/1e4,digits = 2)
+  )
+
+p3 <- ggplot(gdata,aes(HeLa_I,HeLa_M,fill=HeLaS3_IP))+
+  geom_tile()+
+  geom_text(mapping = aes(label=HeLaS3_IP))+
+  scale_fill_gradient(low = "#f0f9ff",high = "#1d99ff")+
+  theme_bw()
+
+
+p4 <- ggplot(gdata,aes(HeLa_I,HeLa_M,fill=HeLaS3_MP))+
+  geom_tile()+
+  geom_text(mapping = aes(label=HeLaS3_MP))+
+  scale_fill_gradient(low = "#f0f9ff",high = "#1d99ff")+
+  theme_bw()
+
+
+pdf("figures/composition of chromatin RNA.2.pdf",width = 12,height = 10)
+ggpubr::ggarrange(plotlist = list(p1,p2,p3,p4),ncol = 2,nrow = 2)
+dev.off()
+
+```
+
+
+
+```{r export cheRNA bed}
+lapply(names(cheRNA_type),function(x){
+  
+  data <- gene.list.table %>% filter(gene_symbol %in% cheRNA_type[[x]][["gene_symbol"]])
+  data <- data %>% 
+    mutate(direction = hash(key = cheRNA_type[[x]][["gene_symbol"]],value =  cheRNA_type[[x]][["direction"]])[data$gene_symbol],
+           locus_type = hash(key = cheRNA_type[[x]][["gene_symbol"]],value =  cheRNA_type[[x]][["locus_type"]])[data$gene_symbol],
+           locus_group = hash(key = cheRNA_type[[x]][["gene_symbol"]],value =  cheRNA_type[[x]][["locus_group"]])[data$gene_symbol]
+          )
+  data.table::fwrite(data,file = paste0("result/",x,".cheRNA.bed"),sep = "\t")
+  
+})
+
+
+A549_cheRNA.bed <- data.table::fread("result/A549.cheRNA.bed",sep = "\t")
+HeLa_cheRNA.bed <- data.table::fread("result/HeLa.cheRNA.bed",sep = "\t")
+```
+
+
+```{r compare basemean}
+
+p.list <- lapply(names(deresults),function(x){
+  data <- deresults[[x]]
+  
+  p <- ggplot(data,aes(direction,baseMean,color=direction))+
+    geom_violin()+
+    geom_boxplot(width=0.2)+
+    ggsignif::geom_signif(comparisons = list(c("Chr", "NC"),
+                                 c("Chr", "Soluble"),c("NC", "Soluble")),step_increase = 0.1,test = 'wilcox.test')+
+    scale_y_continuous(trans = "log10",name = "normalized expression")+
+    scale_color_manual(values = col_direction,labels=NULL,guide=F)+
+    labs(title = x)+
+    theme_classic()
+})
+
+pdf("figures/compare.BaseMean.pdf",useDingbats = F)
+ggpubr::ggarrange(plotlist = p.list,ncol = 2,nrow = 2)
+dev.off()
+
+p.list <- lapply(names(deresults),function(x){
+  data <- deresults[[x]]
+  
+  p <- ggplot(data,aes(direction,baseMean,color=direction))+
+    geom_violin()+
+    geom_boxplot(width=0.2)+
+    ggsignif::geom_signif(comparisons = list(c("Chr", "NC"),
+                                 c("Chr", "Soluble"),c("NC", "Soluble")),step_increase = 0.1,test = 'wilcox.test')+
+    scale_y_continuous(trans = "log10",name = "normalized expression")+
+    scale_color_manual(values = col_direction,labels=NULL,guide=F)+
+    labs(title = x)+
+    theme_classic()
+})
+
+pdf("figures/compare.BaseMean.pdf")
+ggpubr::ggarrange(plotlist = p.list,ncol = 2,nrow = 2)
+dev.off()
+
+```
+
+
+
+
+```{r}
+A549_cheRNA.bed <- A549_cheRNA.bed %>% type.convert(as.is=T)
+data <- bind_rows(results_A549_I,results_A549_M) %>% 
+  dplyr::group_by(gene_symbol) %>% 
+  summarise(baseMean=mean(baseMean)) %>% 
+  dplyr::filter(gene_symbol %in% A549_cheRNA.bed$gene_symbol) %>% mutate(direction=hash(A549_cheRNA.bed$gene_symbol,value = A549_cheRNA.bed$direction))
+
+
+  p.A549 <- ggplot(data,aes(direction,baseMean,color=direction))+
+    geom_violin()+
+    geom_boxplot(width=0.2)+
+    ggsignif::geom_signif(comparisons = list(c("IO", "MO"),
+                                 c("IM", "IO"),c("IM", "MO")),step_increase = 0.1,test = 'wilcox.test')+
+    scale_y_continuous(trans = "log10",name = "normalized expression")+
+    scale_color_manual(values = col_enrichment,labels=NULL,guide=F)+
+    labs(title = "A549")+
+    theme_classic()
+  
+
+  HeLa_cheRNA.bed <- HeLa_cheRNA.bed %>% type.convert(as.is=T)
+data <- bind_rows(results_HeLa_I,results_HeLa_M) %>% 
+  dplyr::group_by(gene_symbol) %>% 
+  summarise(baseMean=mean(baseMean)) %>% 
+  dplyr::filter(gene_symbol %in% HeLa_cheRNA.bed$gene_symbol) %>% mutate(direction=hash(HeLa_cheRNA.bed$gene_symbol,value = HeLa_cheRNA.bed$direction))
+
+
+  p.HeLa <- ggplot(data,aes(direction,baseMean,color=direction))+
+    geom_violin()+
+    geom_boxplot(width=0.2)+
+    ggsignif::geom_signif(comparisons = list(c("IO", "MO"),
+                                 c("IM", "IO"),c("IM", "MO")),step_increase = 0.1,test = 'wilcox.test')+
+    scale_y_continuous(trans = "log10",name = "normalized expression")+
+    scale_color_manual(values = col_enrichment,labels=NULL,guide=F)+
+    labs(title = "HelaS3")+
+    theme_classic()
+  
+  pdf("figures/compare.BaseMean.cheRNA.pdf",useDingbats = F)
+  ggpubr::ggarrange(plotlist = list(p.A549,p.HeLa),ncol = 2)
+  dev.off()
+```
+
+
+# GRID target
+
+```{r A549 cheRNA GRID target expression}
+
+A549.cheRNA.GRID <- data.table::fread("grid/A549.cheRNA.GRID.net.edge.csv",stringsAsFactors = F)
+
+results_A549_I$gene_symbol <- type.convert(results_A549_I$gene_symbol, as.is = T)
+
+A549.cheRNA.GRID <- A549.cheRNA.GRID %>% 
+  mutate(baseMean_I = hash(key = results_A549_I$gene_symbol,value = results_A549_I$baseMean)[Target],
+         baseMean_M = hash(key = results_A549_M$gene_symbol,value = results_A549_M$baseMean)[Target]) %>% na.omit()
+
+summary(factor(A549.cheRNA.GRID$Label))
+
+background_I <- results_A549_I %>% filter(!(gene_symbol %in% A549.cheRNA.GRID$Target))
+background_M <- results_A549_M %>% filter(!(gene_symbol %in% A549.cheRNA.GRID$Target))
+
+data_I <- rbind(
+  data.frame(symbol=A549.cheRNA.GRID$Target,Label=A549.cheRNA.GRID$Label,baseMean_I=A549.cheRNA.GRID$baseMean_I),
+data.frame(symbol=background_I$gene_symbol,Label=background_I$direction,baseMean_I=background_I$baseMean)) %>% 
+  filter(Label %in% c("IM","IO","MO","NC","Chr"))
+
+
+  p.I <- ggplot(data_I,aes(Label,baseMean_I,color=Label))+
+    geom_violin()+
+    geom_boxplot(width=0.2)+
+    ggsignif::geom_signif(comparisons = list(
+                                 c("IM", "IO"),c("IM", "MO"),c("IM", "Chr"),c("IM","NC")),step_increase = 0.1,test = 'wilcox.test')+
+    scale_y_continuous(trans = "log10",name = "normalized expression")+
+#    scale_color_manual(values = col_enrichment,labels=NULL,guide=F)+
+    labs(title = "expression in A549 interphase cells")+
+    theme_classic()
+  
+  
+  data_M <- rbind(
+  data.frame(symbol=A549.cheRNA.GRID$Target,Label=A549.cheRNA.GRID$Label,baseMean_M=A549.cheRNA.GRID$baseMean_M),
+data.frame(symbol=background_M$gene_symbol,Label=background_M$direction,baseMean_M=background_M$baseMean)) %>% 
+  filter(Label %in% c("IM","IO","MO","NC","Chr"))
+
+  data.table::fwrite(x=data_I,file = paste0("result/","A549",".GRID Target.baseMeas.I.gz"),sep = "\t")
+  data.table::fwrite(x=data_M,file = paste0("result/","A549",".GRID Target.baseMeas.M.gz"),sep = "\t")
+  
+  p.M <- ggplot(data_M,aes(Label,baseMean_M,color=Label))+
+    geom_violin()+
+    geom_boxplot(width=0.2)+
+    ggsignif::geom_signif(comparisons = list(
+                                 c("IM", "IO"),c("IM", "MO"),c("IM", "Chr"),c("IM","NC")),step_increase = 0.1,test = 'wilcox.test')+
+    scale_y_continuous(trans = "log10",name = "normalized expression")+
+#    scale_color_manual(values = col_enrichment,labels=NULL,guide=F)+
+    labs(title = "expression in A549 M phase cells")+
+    theme_classic()
+  
+  
+  pdf("figures/compare.BaseMean.GRID.target in A549.pdf",useDingbats = F)
+  ggpubr::ggarrange(plotlist = list(p.I,p.M),ncol = 2)
+  dev.off()
+
+
+
+```
+
+```{r hela cheRNA GRID target expression }
+HeLa.cheRNA.GRID <- data.table::fread("grid/HeLa.cheRNA.GRID.net.edge.csv",stringsAsFactors = F)
+
+results_HeLa_I$gene_symbol <- type.convert(results_HeLa_I$gene_symbol, as.is = T)
+results_HeLa_M$gene_symbol <- type.convert(results_HeLa_M$gene_symbol, as.is = T)
+
+HeLa.cheRNA.GRID <- HeLa.cheRNA.GRID %>% 
+  mutate(baseMean_I = hash(key = results_HeLa_I$gene_symbol,value = results_HeLa_I$baseMean)[Target],
+         baseMean_M = hash(key = results_HeLa_M$gene_symbol,value = results_HeLa_M$baseMean)[Target]) %>% na.omit()
+
+background_I <- results_HeLa_I %>% filter(!(gene_symbol %in% HeLa.cheRNA.GRID$Target))
+background_M <- results_HeLa_M %>% filter(!(gene_symbol %in% HeLa.cheRNA.GRID$Target))
+
+data_I <- rbind(
+  data.frame(symbol=HeLa.cheRNA.GRID$Target,Label=HeLa.cheRNA.GRID$Label,baseMean_I=HeLa.cheRNA.GRID$baseMean_I),
+data.frame(symbol=background_I$gene_symbol,Label=background_I$direction,baseMean_I=background_I$baseMean)) %>% 
+  filter(Label %in% c("IM","IO","MO","NC","Chr"))
+
+
+  p.I <- ggplot(data_I,aes(Label,baseMean_I,color=Label))+
+    geom_violin()+
+    geom_boxplot(width=0.2)+
+    ggsignif::geom_signif(comparisons = list(
+                                 c("IM", "IO"),c("IM", "MO"),c("IM", "Chr"),c("IM","NC")),step_increase = 0.1,test = 'wilcox.test')+
+    scale_y_continuous(trans = "log10",name = "normalized expression")+
+#    scale_color_manual(values = col_enrichment,labels=NULL,guide=F)+
+    labs(title = "expression in HeLaS3 interphase cells")+
+    theme_classic()
+  
+  
+  data_M <- rbind(
+  data.frame(symbol=HeLa.cheRNA.GRID$Target,Label=HeLa.cheRNA.GRID$Label,baseMean_M=HeLa.cheRNA.GRID$baseMean_M),
+data.frame(symbol=background_M$gene_symbol,Label=background_M$direction,baseMean_M=background_M$baseMean)) %>% 
+  filter(Label %in% c("IM","IO","MO","NC","Chr"))
+ 
+  data.table::fwrite(x=data_I,file = paste0("result/",x,".GRID Target.baseMeas.I.gz"),sep = "\t")
+  data.table::fwrite(x=data_M,file = paste0("result/",x,".GRID Target.baseMeas.M.gz"),sep = "\t")
+
+  p.M <- ggplot(data_M,aes(Label,baseMean_M,color=Label))+
+    geom_violin()+
+    geom_boxplot(width=0.2)+
+    ggsignif::geom_signif(comparisons = list(
+                                 c("IM", "IO"),c("IM", "MO"),c("IM", "Chr"),c("IM","NC")),step_increase = 0.1,test = 'wilcox.test')+
+    scale_y_continuous(trans = "log10",name = "normalized expression")+
+#    scale_color_manual(values = col_enrichment,labels=NULL,guide=F)+
+    labs(title = "expression in HeLaS3 M phase cells")+
+    theme_classic()
+  
+  
+  pdf("figures/compare.BaseMean.GRID.target in HeLaS3.pdf",useDingbats = F)
+  ggpubr::ggarrange(plotlist = list(p.I,p.M),ncol = 2)
+  dev.off()
+
+
+```
+
+# MARGI
+```{r import MARGI gene associations}
+A549.cheRNA.diMARGI_H9 <- data.table::fread("margi/A549.cheRNA.diMARGI_H9.net.edge.csv")
+A549.cheRNA.diMARGI_H9.inter <- A549.cheRNA.diMARGI_H9 %>% filter(Source != Target)
+
+A549.cheRNA.diMARGI_HEK <- data.table::fread("margi/A549.cheRNA.diMARGI_HEK.net.edge.csv")
+A549.cheRNA.diMARGI_HEK.inter <- A549.cheRNA.diMARGI_HEK %>% filter(Source != Target)
+
+HeLa.cheRNA.diMARGI_H9 <- data.table::fread("margi/HeLa.cheRNA.diMARGI_H9.net.edge.csv")
+HeLa.cheRNA.diMARGI_H9.inter <- HeLa.cheRNA.diMARGI_H9 %>% filter(Source != Target)
+
+HeLa.cheRNA.diMARGI_HEK <- data.table::fread("margi/HeLa.cheRNA.diMARGI_HEK.net.edge.csv")
+HeLa.cheRNA.diMARGI_HEK.inter <- HeLa.cheRNA.diMARGI_HEK %>% filter(Source != Target)
+
+
+
+diMARGI.inter = list(A549_H9=A549.cheRNA.diMARGI_H9.inter,
+                     A549_HEK=A549.cheRNA.diMARGI_HEK.inter,
+                     HeLa_H9=HeLa.cheRNA.diMARGI_H9.inter,
+                     HeLa_HEK=HeLa.cheRNA.diMARGI_HEK.inter
+                     )
+diMARGI = list(A549_H9=A549.cheRNA.diMARGI_H9,
+                     A549_HEK=A549.cheRNA.diMARGI_HEK,
+                     HeLa_H9=HeLa.cheRNA.diMARGI_H9,
+                     HeLa_HEK=HeLa.cheRNA.diMARGI_HEK
+                     )
+```
+
+
+```{r MARGI target expression}
+
+background_list = list(
+  A549_H9=list(results_A549_I,results_A549_M),
+  A549_HEK=list(results_A549_I,results_A549_M),
+  HeLa_H9=list(results_HeLa_I,results_HeLa_M),
+  HeLa_HEK=list(results_HeLa_I,results_HeLa_M))
+
+
+lapply(names(diMARGI.inter),function(x){
+  data <- diMARGI.inter[[x]]
+  
+  background_I <- background_list[[x]][[1]] %>% as.data.frame() %>% type.convert(as.is=T)
+  background_M <- background_list[[x]][[2]] %>% as.data.frame() %>% type.convert(as.is=T)
+  
+   data <- data %>% 
+  mutate(baseMean_I = hash(key = background_I$gene_symbol,value = background_I$baseMean)[Target],
+         baseMean_M = hash(key = background_M$gene_symbol,value = background_M$baseMean)[Target]) %>% na.omit()
+
+  NC_I <- background_I %>% filter(!(gene_symbol %in% data$Target)) %>% type.convert(as.is=T) %>%  mutate(direction=hash(key = background_I$gene_symbol,value = background_I$direction)[gene_symbol]) %>% na.omit() %>% 
+  filter(direction == "NC")
+  
+  data_I <- rbind(
+  data.frame(symbol=data$Target,Label=data$Label,baseMean_I=data$baseMean_I),
+data.frame(symbol=background_I$gene_symbol,Label=background_I$direction,baseMean_I=background_I$baseMean)) %>% 
+  filter(Label %in% c("IM","IO","MO","NC","Chr"))
+  
+  
+    NC_M <- background_M %>% filter(!(gene_symbol %in% data$Target)) %>% type.convert(as.is=T) %>%  mutate(direction=hash(key = background_M$gene_symbol,value = background_M$direction)[gene_symbol]) %>% na.omit() %>% 
+  filter(direction == "NC")
+ 
+
+  
+  data_M <- rbind(
+  data.frame(symbol=data$Target,Label=data$Label,baseMean_M=data$baseMean_M),
+data.frame(symbol=background_M$gene_symbol,Label=background_M$direction,baseMean_M=background_M$baseMean)) %>% 
+  filter(Label %in% c("IM","IO","MO","NC","Chr"))
+  
+  data.table::fwrite(x=data_I,file = paste0("result/",x,".MARGI Target.baseMeas.I.gz"),sep = "\t")
+  data.table::fwrite(x=data_M,file = paste0("result/",x,".MARGI Target.baseMeas.M.gz"),sep = "\t")
+  
+    p.I <- ggplot(data_I,aes(Label,log10(1+baseMean_I)))+
+    geom_violin()+
+    geom_boxplot(width=0.2,aes(fill=Label))+
+    ggsignif::geom_signif(comparisons = list(
+                                 c("IM", "IO"),c("IM", "Chr"),c("IM","NC")),step_increase = 0.1,test.args = "greater",test = 'wilcox.test')+
+    scale_y_continuous(name = "normalized log10 expression")+
+    scale_color_manual(values = col_enrichment,labels=NULL,guide=F)+
+    labs(title = paste0("cheRNA target Iphase Nascent RNA:",x))+
+    theme_classic()
+    
+      p.M <- ggplot(data_M,aes(Label,log10(1+baseMean_M)))+
+    geom_violin()+
+    geom_boxplot(width=0.2,aes(fill=Label))+
+    ggsignif::geom_signif(comparisons = list(
+                                 c("IM", "MO"),c("IM", "Chr"),c("IM","NC")),step_increase = 0.1,test.args = "greater",test = 'wilcox.test')+
+    scale_y_continuous(name = "normalized log10 expression")+
+    scale_color_manual(values = col_enrichment,labels=NULL,guide=F)+
+    labs(title = paste0("cheRNA target Mphase Nascent RNA:",x))+
+    theme_classic()
+  
+  pdf(paste0("figures/compare.baseMean.MARGI.",x,".pdf"),useDingbats = F)
+  ggpubr::ggarrange(plotlist = list(p.I,p.M),ncol = 2) %>% print()
+  dev.off()
+  
+  })
+
+
+```
+
+## 导入nascent RNA-seq的数据
+```{r}
+
+
+NascentRNA <- data.table::fread("gene_count_matrix_NascentRNA.csv",sep = ",",stringsAsFactors = F)
+
+NascentRNA.rpm <- edgeR::cpm(NascentRNA[,2:5]) %>% as.data.frame() %>% mutate(symbol=NascentRNA$gene_id)
+
+
+NascentRNA.rpm <- NascentRNA.rpm %>% mutate(Mean_I = (SRR2149280+SRR2149281)/2,
+                                            Mean_M = (SRR2149282+SRR2149283)/2) %>% type.convert(as.is=T)
+
+
+```
+
+
+
+```{r sum nascent RNA-seq of different cheRNA }
+
+DESeqResults.list <- list(A549=list(I=results_A549_I,
+                                    M=results_A549_M),
+                          HeLaS3=list(I=results_HeLa_I,
+                                    M=results_HeLa_M))
+
+NascentRNA.rpm.2 <- NascentRNA.rpm %>% type.convert(as.is=T) %>% 
+  mutate(direction_I = hash(key = results_HeLa_I$gene_symbol,value = results_HeLa_I$direction)[symbol],
+         direction_M = hash(key = results_HeLa_M$gene_symbol,value = results_HeLa_M$direction)[symbol])
+
+
+NascentRNA.rpm.2$direction_I[is.na(NascentRNA.rpm.2$direction_I)] <- "filtered"
+NascentRNA.rpm.2$direction_M[is.na(NascentRNA.rpm.2$direction_M)] <- "filtered"
+
+NascentRNA.rpm.3 <- NascentRNA.rpm.2 %>% dplyr::group_by(direction_I,direction_M) %>% 
+  summarise(sum_I = sum(Mean_I),sum_M=sum(Mean_M))
+
+
+
+ggplot(NascentRNA.rpm.3,aes(direction_I,direction_M,fill=factor(direction_M,levels = c("Soluble","NC","Chr","filtered"))))+
+  geom_bar(position = "fill",stat = "identity")+
+ 
+  scale_fill_manual(values = c(col_direction,"filtered"="#111111"),limits=c("Soluble","NC","Chr"),name=NULL)+
+  theme_bw()
+
+
+NascentRNA.rpm.prop <- signif(NascentRNA.rpm.3[,3:4]/1e4,digits = 2) %>%
+  mutate(direction_I = NascentRNA.rpm.3$direction_I,
+         direction_M = NascentRNA.rpm.3$direction_M)
+
+ggplot(NascentRNA.rpm.prop,aes(direction_I,direction_M,fill=sum_I))+
+  geom_tile()+
+  geom_text(mapping = aes(label=sum_I,color= -sum_I))+
+  theme_bw()
+
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### GRID cheRNA target in HeLaS3  nascent expression
+```{r}
+A549.cheRNA.GRID <- data.table::fread("grid/A549.cheRNA.GRID.net.edge.csv",stringsAsFactors = F)
+HeLa.cheRNA.GRID <- data.table::fread("grid/HeLa.cheRNA.GRID.net.edge.csv",stringsAsFactors = F)
+
+background_list = list(
+  A549 = list(
+    I = NascentRNA.rpm  %>% mutate(direction = hash(key = results_A549_I$gene_symbol, value = results_A549_I$direction)[symbol]) %>% na.omit,
+    M = NascentRNA.rpm %>%  mutate(direction = hash(key = results_A549_M$gene_symbol, value = results_A549_M$direction)[symbol]) %>% na.omit),
+  HeLa = list(
+    I = NascentRNA.rpm %>% mutate(direction = hash(key = results_HeLa_I$gene_symbol, value = results_HeLa_I$direction)[symbol]) %>% na.omit,
+    M = NascentRNA.rpm %>% mutate(direction = hash(key = results_HeLa_M$gene_symbol, value = results_HeLa_M$direction)[symbol]) %>% na.omit)
+  )
+
+cheRNA.GRID <- list(A549=A549.cheRNA.GRID,HeLa=HeLa.cheRNA.GRID)
+
+cheRNA.GRID <- lapply(X = list(A549=A549.cheRNA.GRID,HeLa=HeLa.cheRNA.GRID),FUN = function(x){
+
+  cheRNA.GRID <- x %>% 
+  mutate(baseMean_I = hash(key = NascentRNA.rpm$symbol,value = NascentRNA.rpm$Mean_I)[Target],
+         baseMean_M = hash(key = NascentRNA.rpm$symbol,value = NascentRNA.rpm$Mean_M)[Target]) %>% na.omit()
+
+})
+
+
+
+lapply(names(cheRNA.GRID),function(x){
+  data <- cheRNA.GRID[[x]]
+
+  background_I <- background_list[[x]][["I"]] %>% as.data.frame() %>% type.convert(as.is=T)
+  background_M <- background_list[[x]][["M"]] %>% as.data.frame() %>% type.convert(as.is=T)
+  
+  data <- data %>% 
+  mutate(baseMean_I = hash(key = background_I$symbol,value = background_I$Mean_I)[Target],
+         baseMean_M = hash(key = background_M$symbol,value = background_M$Mean_M)[Target]) %>% na.omit()
+
+  
+  
+  NC_I <- background_I %>% filter(!(symbol %in% data$Target)) %>% type.convert(as.is=T)  %>% na.omit() %>% filter(direction %in% c("NC","Chr"))
+  
+  data_I <- rbind(
+  data.frame(symbol=data$Target,Label=data$Label,baseMean_I=data$baseMean_I),
+  data.frame(symbol=NC_I$symbol,Label=NC_I$direction,baseMean_I=NC_I$Mean_I)) %>% 
+  filter(Label %in% c("IM","IO","MO","NC","Chr"))
+  
+  
+  NC_M <- background_M %>% filter(!(symbol %in% data$Target)) %>% type.convert(as.is=T)  %>% na.omit() %>% filter(direction %in% c("NC","Chr"))
+ 
+
+  
+  data_M <- rbind(
+  data.frame(symbol=data$Target,Label=data$Label,baseMean_M=data$baseMean_M),
+  data.frame(symbol=NC_M$symbol,Label=NC_M$direction,baseMean_M=NC_M$Mean_M)) %>% 
+  filter(Label %in% c("IM","IO","MO","NC","Chr"))
+  
+  data.table::fwrite(x=data_I,file = paste0("result/",x,".GRID Target.inHeLaS3.I.NascentRNA.rpm.gz"),sep = "\t")
+  data.table::fwrite(x=data_M,file = paste0("result/",x,".GRID Target.inHeLaS3.M.NascentRNA.rpm.gz"),sep = "\t")
+
+    p.I <- ggplot(data_I,aes(Label,log10(1+baseMean_I)))+
+    geom_violin()+
+    geom_boxplot(width=0.2,aes(fill=Label))+
+    ggsignif::geom_signif(comparisons = list(
+                                 c("IM", "IO"),c("IM", "MO"),c("IM", "Chr"),c("IM","NC")),step_increase = 0.1,test.args = "greater",test = 'wilcox.test')+
+    scale_y_continuous(name = "normalized log10 expression")+
+    scale_color_manual(values = col_enrichment,labels=NULL,guide=F)+
+    labs(title = paste0(x," cheRNA target in HeLa Iphase Nascent RNA:"))+
+    theme_classic()
+    
+      p.M <- ggplot(data_M,aes(Label,log10(1+baseMean_M)))+
+    geom_violin()+
+    geom_boxplot(width=0.2,aes(fill=Label))+
+    ggsignif::geom_signif(comparisons = list(
+                                 c("IM", "IO"),c("IM", "MO"),c("IM", "Chr"),c("IM","NC")),step_increase = 0.1,test.args = "greater",test = 'wilcox.test')+
+    scale_y_continuous(name = "normalized log10 expression")+
+    scale_color_manual(values = col_enrichment,labels=NULL,guide=F)+
+    labs(title = paste0(x," cheRNA target Mphase Nascent RNA:"))+
+    theme_classic()
+  
+  pdf(paste0("figures/compare.NasRNA of GRID targets.",x,".pdf"),useDingbats = F)
+  ggpubr::ggarrange(plotlist = list(p.I,p.M),ncol = 2) %>% print()
+  dev.off()
+  
+  })
+
+
+
+```
+
+### MARGI cheRNA target in HeLaS3  nascent expression
+```{r}
+
+  
+background_list = list(
+  A549 = list(
+    I = NascentRNA.rpm  %>% mutate(direction = hash(key = results_A549_I$gene_symbol, value = results_A549_I$direction)[symbol]) %>% na.omit,
+    M = NascentRNA.rpm %>%  mutate(direction = hash(key = results_A549_M$gene_symbol, value = results_A549_M$direction)[symbol]) %>% na.omit),
+  HeLa = list(
+    I = NascentRNA.rpm %>% mutate(direction = hash(key = results_HeLa_I$gene_symbol, value = results_HeLa_I$direction)[symbol]) %>% na.omit,
+    M = NascentRNA.rpm %>% mutate(direction = hash(key = results_HeLa_M$gene_symbol, value = results_HeLa_M$direction)[symbol]) %>% na.omit)
+  )
+
+
+
+
+lapply(names(diMARGI.inter),function(x){
+  data <- diMARGI.inter[[x]]
+
+backnames <- hash(key = c("A549_H9","A549_HEK","HeLa_H9","HeLa_HEK"),value = c("A549","A549","HeLa","HeLa"))
+
+
+  background_I <- background_list[[backnames[x]]][["I"]] %>% as.data.frame() %>% type.convert(as.is=T)
+  background_M <- background_list[[backnames[x]]][["M"]] %>% as.data.frame() %>% type.convert(as.is=T)
+  
+  data <- data %>% 
+  mutate(baseMean_I = hash(key = background_I$symbol,value = background_I$Mean_I)[Target],
+         baseMean_M = hash(key = background_M$symbol,value = background_M$Mean_M)[Target]) %>% na.omit()
+
+  
+  
+  NC_I <- background_I %>% filter(!(symbol %in% data$Target)) %>% type.convert(as.is=T)  %>% na.omit() %>% filter(direction %in% c("NC","Chr"))
+  
+  data_I <- rbind(
+  data.frame(symbol=data$Target,Label=data$Label,baseMean_I=data$baseMean_I),
+  data.frame(symbol=NC_I$symbol,Label=NC_I$direction,baseMean_I=NC_I$Mean_I)) %>% 
+  filter(Label %in% c("IM","IO","MO","NC","Chr"))
+  
+  
+  NC_M <- background_M %>% filter(!(symbol %in% data$Target)) %>% type.convert(as.is=T)  %>% na.omit() %>% filter(direction %in% c("NC","Chr"))
+ 
+
+  
+  data_M <- rbind(
+  data.frame(symbol=data$Target,Label=data$Label,baseMean_M=data$baseMean_M),
+  data.frame(symbol=NC_M$symbol,Label=NC_M$direction,baseMean_M=NC_M$Mean_M)) %>% 
+  filter(Label %in% c("IM","IO","MO","NC","Chr"))
+  
+  
+data.table::fwrite(x=data_I,file = paste0("result/",x,"MARGI Target.inHeLaS3.I.NascentRNA.rpm.gz"),sep = "\t")
+data.table::fwrite(x=data_M,file = paste0("result/",x,"MARGI Target.inHeLaS3.M.NascentRNA.rpm.gz"),sep = "\t")
+
+    p.I <- ggplot(data_I,aes(Label,log10(1+baseMean_I)))+
+    geom_violin()+
+    geom_boxplot(width=0.2,aes(fill=Label))+
+    ggsignif::geom_signif(comparisons = list(
+                                 c("IM", "IO"),c("IM", "Chr"),c("IM","NC")),step_increase = 0.1,test.args = "greater",test = 'wilcox.test')+
+    scale_y_continuous(name = "normalized log10 expression")+
+    scale_color_manual(values = col_enrichment,labels=NULL,guide=F)+
+    labs(title = paste0(x," cheRNA target in HeLa Iphase Nascent RNA:"))+
+    theme_classic()
+    
+      p.M <- ggplot(data_M,aes(Label,log10(1+baseMean_M)))+
+    geom_violin()+
+    geom_boxplot(width=0.2,aes(fill=Label))+
+    ggsignif::geom_signif(comparisons = list(
+                                 c("IM", "MO"),c("IM", "Chr"),c("IM","NC")),step_increase = 0.1,test.args = "greater",test = 'wilcox.test')+
+    scale_y_continuous(name = "normalized log10 expression")+
+    scale_color_manual(values = col_enrichment,labels=NULL,guide=F)+
+    labs(title = paste0(x," cheRNA target Mphase Nascent RNA:"))+
+    theme_classic()
+  
+  pdf(paste0("figures/compare.NasRNA of MARGI targets.",x,".pdf"),useDingbats = F)
+  ggpubr::ggarrange(plotlist = list(p.I,p.M),ncol = 2) %>% print()
+  dev.off()
+  
+  })
+
+
+
+```
+
+
+```{r 比较不同类型的RNA在HeLaS3中的表达}
+# 
+results_HeLa_I <- type.convert(results_HeLa_I,as.is=T)
+results_HeLa_M <- type.convert(results_HeLa_M,as.is=T)
+summary(results_HeLa_M)
+NascentRNA.rpm <- NascentRNA.rpm %>% 
+  mutate (direction_I = hash(key = results_HeLa_I$gene_symbol,value = results_HeLa_I$direction)[symbol],
+          direction_M = hash(key = results_HeLa_M$gene_symbol,value = results_HeLa_M$direction)[symbol])
+
+NascentRNA.rpm <- NascentRNA.rpm %>% 
+  mutate (direction_I = hash(key = results_HeLa_I$gene_symbol,value = results_HeLa_I$direction)[symbol],
+          direction_M = hash(key = results_HeLa_M$gene_symbol,value = results_HeLa_M$direction)[symbol]) %>% 
+  na.omit()
+
+
+  p.I <- ggplot(NascentRNA.rpm,aes(direction_I,Mean_I,color=direction_I))+
+    geom_violin()+
+    geom_boxplot(width=0.2)+
+    ggsignif::geom_signif(comparisons = list(
+                                 c("Chr", "NC"),c("Chr", "Soluble")),step_increase = 0.1,test = 'wilcox.test')+
+    scale_y_continuous(trans = "log10",name = "normalized expression")+
+    scale_color_manual(values = col_direction,labels=NULL,guide=F)+
+    labs(title = "Nascent expressionin HeLa I phase")+
+    theme_classic()
+  
+    p.M <- ggplot(NascentRNA.rpm,aes(direction_M,Mean_M,color=direction_M))+
+    geom_violin()+
+    geom_boxplot(width=0.2)+
+    ggsignif::geom_signif(comparisons = list(
+                                 c("Chr", "NC"),c("Chr", "Soluble")),step_increase = 0.1,test = 'wilcox.test')+
+    scale_y_continuous(trans = "log10",name = "normalized expression")+
+    scale_color_manual(values = col_direction,labels=NULL,guide=F)+
+    labs(title = "Nascent expressionin HeLa M phase")+
+    theme_classic()
+    
+  pdf("figures/compare.NascentRNA.in HeLaS3.pdf",useDingbats = F)
+  ggpubr::ggarrange(plotlist = list(p.I,p.M),ncol = 2)
+  dev.off()
+  
+```
+
+
+
+```{r 比较不同类型的cheRNA在HeLaS3中的表达}
+# 
+results_HeLa_I <- type.convert(results_HeLa_I,as.is=T)
+results_HeLa_M <- type.convert(results_HeLa_M,as.is=T)
+summary(results_HeLa_M)
+
+
+NascentRNA.rpm <- NascentRNA.rpm %>% 
+  mutate (direction_I = hash(key = results_HeLa_I$gene_symbol,value = results_HeLa_I$direction)[symbol],
+          direction_M = hash(key = results_HeLa_M$gene_symbol,value = results_HeLa_M$direction)[symbol])
+
+NascentRNA.rpm <- NascentRNA.rpm %>% 
+  mutate (direction_I = hash(key = results_HeLa_I$gene_symbol,value = results_HeLa_I$direction)[symbol],
+          direction_M = hash(key = results_HeLa_M$gene_symbol,value = results_HeLa_M$direction)[symbol]) %>% 
+  na.omit()
+
+
+gdata <- HeLa_cheRNA.bed %>% type.convert(as.is=T) %>% 
+  mutate(Nascent_I = hash(NascentRNA.rpm$symbol,NascentRNA.rpm$Mean_I)[gene_symbol],
+         Nascent_M = hash(NascentRNA.rpm$symbol,NascentRNA.rpm$Mean_M)[gene_symbol]) %>% na.omit() %>% type.convert()
+
+summary(gdata$direction)
+
+
+  p.I <- ggplot(gdata,aes(direction,Nascent_I))+
+    geom_violin(aes(color=direction))+
+    geom_boxplot(width=0.2,aes(fill=direction))+
+    ggsignif::geom_signif(comparisons = list(
+                                 c("IM", "IO"),c("IM", "MO")),step_increase = 0.1,test = 'wilcox.test')+
+    scale_y_continuous(trans = "log10",name = "normalized expression")+
+    scale_fill_manual(values = col_enrichment,labels=NULL,guide=F)+
+    scale_color_manual(values = col_enrichment,labels=NULL,guide=F)+
+    labs(title = "cheRNA Nascent expressionin HeLa I phase")+
+    theme_classic()
+  
+  p.M <- ggplot(gdata,aes(direction,Nascent_M))+
+    geom_violin(aes(color=direction))+
+    geom_boxplot(width=0.2,aes(fill=direction))+
+    ggsignif::geom_signif(comparisons = list(
+                                 c("IM", "IO"),c("IM", "MO")),step_increase = 0.1,test = 'wilcox.test')+
+    scale_y_continuous(trans = "log10",name = "normalized expression")+
+    scale_color_manual(values = col_enrichment,labels=NULL,guide=F)+
+    scale_fill_manual(values = col_enrichment,labels=NULL,guide=F)+
+    labs(title = "cheRNA Nascent expressionin HeLa M phase")+
+    theme_classic()
+  
+
+  pdf("figures/compare.cheRNA.NascentRNA.in HeLaS3.pdf",useDingbats = F)
+  ggpubr::ggarrange(plotlist = list(p.I,p.M),ncol = 2)
+  dev.off()
+  
+```
+
+
+
+```{r MARGI target nascent expression}
+
+#x <- names(diMARGI.inter)[1] test
+
+lapply(names(diMARGI.inter),function(x){
+  data <- diMARGI[[x]]
+  
+  data <- data %>% 
+  mutate(baseMean_I = hash(key = NascentRNA.rpm$symbol,value = NascentRNA.rpm$Mean_I)[Target],
+         baseMean_M = hash(key = NascentRNA.rpm$symbol,value = NascentRNA.rpm$Mean_M)[Target]) %>% na.omit()
+
+  background_I <- background_list[[x]][[1]] %>% as.data.frame() %>% type.convert(as.is=T)
+  
+ 
+  background_I <- NascentRNA.rpm %>% filter(!(symbol %in% data$Target)) %>% type.convert(as.is=T) %>%  mutate(direction=hash(key = background_I$gene_symbol,value = background_I$direction)[symbol]) %>% na.omit()
+  
+  data_I <- rbind(
+  data.frame(symbol=data$Target,Label=data$Label,baseMean_I=data$baseMean_I),
+data.frame(symbol=background_I$symbol,Label=background_I$direction,baseMean_I=background_I$Mean_I)) %>% 
+  filter(Label %in% c("IM","IO","NC","Chr"))
+  
+  background_M <- background_list[[x]][[2]] %>% as.data.frame() %>% type.convert(as.is=T)
+  
+ 
+  background_M <- NascentRNA.rpm %>% filter(!(symbol %in% data$Target)) %>% type.convert(as.is=T) %>%  mutate(direction=hash(key = background_M$gene_symbol,value = background_M$direction)[symbol]) %>% na.omit()
+  
+  data_M <- rbind(
+  data.frame(symbol=data$Target,Label=data$Label,baseMean_M=data$baseMean_M),
+data.frame(symbol=background_M$symbol,Label=background_M$direction,baseMean_M=background_M$Mean_M)) %>% 
+  filter(Label %in% c("IM","MO","NC","Chr"))
+  
+  
+  
+    p.I <- ggplot(data_I,aes(Label,log10(1+baseMean_I)))+
+    geom_violin()+
+    geom_boxplot(width=0.2,aes(fill=Label))+
+    ggsignif::geom_signif(comparisons = list(
+                                 c("IM", "IO"),c("IM", "Chr"),c("IM","NC")),step_increase = 0.1,test.args = "greater",test = 'wilcox.test')+
+    scale_y_continuous(name = "normalized log10 expression")+
+    scale_color_manual(values = col_enrichment,labels=NULL,guide=F)+
+    labs(title = paste0("cheRNA target Iphase Nascent RNA:",x))+
+    theme_classic()
+    
+      p.M <- ggplot(data_M,aes(Label,log10(1+baseMean_M)))+
+    geom_violin()+
+    geom_boxplot(width=0.2,aes(fill=Label))+
+    ggsignif::geom_signif(comparisons = list(
+                                 c("IM", "MO"),c("IM", "Chr"),c("IM","NC")),step_increase = 0.1,test.args = "greater",test = 'wilcox.test')+
+    scale_y_continuous(name = "normalized log10 expression")+
+    scale_color_manual(values = col_enrichment,labels=NULL,guide=F)+
+    labs(title = paste0("cheRNA target Mphase Nascent RNA:",x))+
+    theme_classic()
+  
+  pdf(paste0("figures/compare.NascentRNA.MARGI.",x,".pdf"),useDingbats = F)
+  ggpubr::ggarrange(plotlist = list(p.I,p.M),ncol = 2) %>% print()
+  dev.off()
+  
+  })
+
+```
+

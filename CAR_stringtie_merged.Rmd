@@ -1,0 +1,308 @@
+---
+title: "CAR_strintie_merged"
+author: "Yan"
+date: "2022/7/25"
+output: html_document
+---
+
+this is script to identify cheRNAs from stringtie-merged genes, and then compare with genecode annotation
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pdf.options(useDingbats=F)
+library(dplyr)
+
+# colors
+
+col_cell <- c("A549"="#1a8ce2","HelaS3"="#d8b021")
+
+
+col_direction <- c("Chr"="#0c8cf4","Soluble"="#8ecc7a","NC"="#cdcdcd")
+
+col_enrichment <- c("IM"="#4198ef","IO"="#94c5ed","MO"="#88b6ed") # BLUE 
+#col_enrichment <- c("IM"="#dc585e","IO"="#ebb4b2","MO"="#eacfb5") #orangne
+
+col_fraction <- c("S"="#8ecc7a","P"="#0c8cf4")
+
+
+col_sample <- c("IS"="#2278d6","MS"="#79abd1","IP"="#75d324","MP"="#a5ce7a")
+
+
+source(file = "functions.R")
+```
+
+compare total reads in or out of genecode
+
+```{r}
+
+total_read_count <- read_excel("~/Documents/Typora笔记/CAR实验记录/附件/supp/total_read_count_within_without_genecode.xlsx", 
+                                    sheet = "total read count", skip = 1)
+
+total_read_count <- t(total_read_count_within_without_genecode) %>% as.data.frame() %>% tibble::rownames_to_column(var = "sample")
+
+total_read_count.m <- total_read_count %>% reshape2::melt(value.name = "total reads")
+
+pdf("figures/total reads in out of genecode.pdf")
+ggplot(total_read_count.m,aes(sample,`total reads`,fill=variable))+
+  geom_bar(stat = "identity")+
+  theme_classic()+theme(axis.text.x = element_text(angle = 60,hjust = 1))
+dev.off()
+```
+
+
+
+
+
+
+```{r}
+
+gene_info <- data.table::fread("/Volumes/Seagate/CAR/Ballgown_stringtie_merged/BC1/BC1.abund.txt")
+
+gene_info$`Gene Name`[gene_info$`Gene Name`=="-" | gene_info$`Gene Name`=="."] <- gene_info$`Gene ID`[gene_info$`Gene Name`=="-" | gene_info$`Gene Name`=="."]
+
+tmap <- data.table::fread("/Volumes/Seagate/CAR/stringtie/gffcompare.stringtie_merged.gtf.tmap")
+refmap <- data.table::fread("/Volumes/Seagate/CAR/stringtie/gffcompare.stringtie_merged.gtf.refmap")
+
+tmap$symbol <- hash(key = refmap$ref_id,value = refmap$ref_gene)[tmap$ref_id]
+tmap <- tmap %>% mutate(type=ifelse(is.na(symbol),"unannotated","annotated"))
+
+tmap$symbol[is.na(tmap$symbol)] <- tmap$qry_gene_id[is.na(tmap$symbol)]
+
+tmap_C <- tmap %>% dplyr::count(qry_gene_id,ref_id) %>% mutate(
+  symbol=hash(key = refmap$ref_id,value = refmap$ref_gene)[tmap_C$ref_id]) %>% dplyr::count(qry_gene_id,symbol)
+
+tmap_C$symbol[is.na(tmap_C$symbol)] <- tmap_C$qry_gene_id[is.na(tmap_C$symbol)]
+
+
+tmap_class <- dplyr::count(tmap,class_code)
+
+gene_data<- data.table::fread("/Volumes/Seagate/CAR/Ballgown_stringtie_merged/gene_count_matrix.csv")
+row.names(gene_data) <- gene_data$gene_id
+gene_data <- gene_data %>% mutate(symbol=hash(key = tmap_C$qry_gene_id,value = tmap_C$symbol)[gene_data$gene_id])
+
+
+lib_info <- data.table::fread("../hg38/sample_info.txt") %>% mutate(condition=paste0(CellCycle,PS))
+
+# merge counts with same symbol
+
+gene_data <- gene_data %>% group_by(symbol) %>% summarise(
+  BC1=sum(BC1),
+  BC2=sum(BC2),
+  BC3=sum(BC3),
+  BC4=sum(BC4),
+  BC5=sum(BC5),
+  BC6=sum(BC6),
+  BC7=sum(BC7),
+  BC8=sum(BC8),
+  BC9=sum(BC9),
+  BC10=sum(BC10),
+  BC11=sum(BC11),
+  BC12=sum(BC12),
+  BC13=sum(BC13),
+  BC14=sum(BC14),
+  BC15=sum(BC15),
+  BC16=sum(BC16)
+) %>% as.data.frame()
+
+row.names(gene_data) <- gene_data$symbol
+
+
+```
+
+```{r make  deseq compare}
+
+source('functions.R')
+dir.create("dds_Stringtie_merged")
+
+make_deseq(cell = "A549",compare = c("IS","IP"),ddsName = "dds_Stringtie_merged/A549_I.dds",row.names = "symbol")
+make_deseq(cell = "A549",compare = c("MS","MP"),ddsName = "dds_Stringtie_merged/A549_M.dds",row.names = "symbol")
+
+make_deseq(cell = "HelaS3",compare = c("IS","IP"),ddsName = "dds_Stringtie_merged/HeLa_I.dds",row.names = "symbol")
+make_deseq(cell = "HelaS3",compare = c("MS","MP"),ddsName = "dds_Stringtie_merged/HeLa_M.dds",row.names = "symbol")
+
+
+dir.create("result/Stringtie_merged")
+results_A549_I <-  get_DESeq_results(dds = "dds_Stringtie_merged/A549_I.dds",contrast =c("condition","IP","IS"),padj_cut = 0.05,log2FoldChange_cut=1,outdir="result/Stringtie_merged/",name="A549_I.gz")
+results_A549_M <-  get_DESeq_results(dds = "dds_Stringtie_merged/A549_M.dds",contrast =c("condition","MP","MS"),padj_cut = 0.05,log2FoldChange_cut=1,outdir="result/Stringtie_merged/",name="A549_M.gz")
+results_HeLa_I <-  get_DESeq_results(dds = "dds_Stringtie_merged/HeLa_I.dds",contrast =c("condition","IP","IS"),padj_cut = 0.05,log2FoldChange_cut=1,outdir="result/Stringtie_merged/",name="HeLa_I.gz")
+results_HeLa_M <-  get_DESeq_results(dds = "dds_Stringtie_merged/HeLa_M.dds",contrast =c("condition","MP","MS"),padj_cut = 0.05,log2FoldChange_cut=1,outdir="result/Stringtie_merged/",name="HeLa_M.gz")
+
+# load for re-use
+results_A549_I <- data.table::fread("result/Stringtie_merged/DESeqResult_A549_I.gz")
+results_A549_M <- data.table::fread("result/Stringtie_merged/DESeqResult_A549_M.gz")
+results_HeLa_I <- data.table::fread("result/Stringtie_merged/DESeqResult_HeLa_I.gz")
+results_HeLa_M <- data.table::fread("result/Stringtie_merged/DESeqResult_HeLa_M.gz")
+
+```
+
+
+
+```{r count annotated and unannotated}
+
+count_annotated <- lapply(c("A549_I","A549_M","HeLa_I","HeLa_M"),FUN = function(x){
+  results <- data.table::fread(paste0("result/Stringtie_merged/DESeqResult_",x,".gz"))
+  results <- results %>%  mutate(annotype=hash(key = tmap$symbol,value = tmap$type)[results$gene_symbol])
+  res_count <- dplyr::count(results,direction,annotype) %>% mutate(condition=x)
+}) %>% bind_rows()
+
+p <- ggplot(count_annotated,aes(direction,n))+
+  geom_bar(stat = "identity",aes(fill=annotype))+
+  facet_grid(.~condition)+
+  labs(y="expressed genes")+
+  theme_bw()
+
+pdf("figures/stringtie_merged/compare_annotated.pdf")
+print(p)
+dev.off()
+```
+
+
+```{r}
+count_cheRNA <- lapply(c("A549_I","A549_M","HeLa_I","HeLa_M"),FUN = function(x){
+  results <- data.table::fread(paste0("result/Stringtie_merged/DESeqResult_",x,".gz"))
+  results <- results %>%  mutate(annotype=hash(key = tmap$symbol,value = tmap$type)[results$gene_symbol])
+  res_count <- dplyr::count(results,direction,annotype) %>% mutate(condition=x)
+}) %>% bind_rows()
+
+
+```
+
+
+
+```{r}
+count_cheRNA <- lapply(c("A549_I","A549_M","HeLa_I","HeLa_M"),FUN = function(x){
+  results <- data.table::fread(paste0("result/Stringtie_merged/DESeqResult_",x,".gz")) %>% dplyr::filter(direction=="Chr")
+  results <- results %>%  mutate(annotype=hash(key = tmap$symbol,value = tmap$type)[results$gene_symbol]) %>% mutate(condition=x)
+
+}) %>% bind_rows() %>% data.table::as.data.table()
+
+count_cheRNA.d <- data.table::dcast.data.table(data = count_cheRNA,formula = gene_symbol+annotype~condition,fill = 0L)
+
+
+count_cheRNA.d$A549_I[count_cheRNA.d$A549_I!=0] <-1L
+count_cheRNA.d$A549_M[count_cheRNA.d$A549_M!=0] <-1L
+count_cheRNA.d$HeLa_I[count_cheRNA.d$HeLa_I!=0] <-1L
+count_cheRNA.d$HeLa_M[count_cheRNA.d$HeLa_M!=0] <-1L
+
+count_cheRNA.d$A549_I <- as.integer(count_cheRNA.d$A549_I)
+count_cheRNA.d$A549_M <- as.integer(count_cheRNA.d$A549_M)
+count_cheRNA.d$HeLa_I <- as.integer(count_cheRNA.d$HeLa_I)
+count_cheRNA.d$HeLa_M <- as.integer(count_cheRNA.d$HeLa_M)
+
+library(UpSetR)
+pdf("figures/stringtie_merged/upsetPlot_compare_annotated.pdf")
+upset(count_cheRNA.d,order.by = c("freq","degree"),decreasing=c(T,T),queries = list(
+        list(query = elements, 
+             params = list("annotype", c("unannotated","annotated")), color = "#87C2EA", active = T),
+        list(query = elements, 
+             params = list("annotype", c("annotated")), color = "#B6BA8A", active = T)))
+dev.off()
+
+```
+
+
+
+```{r upset and venn plot }
+cheRNA_list <- list(A549_I = results_A549_I$gene_symbol[results_A549_I$direction=="Chr"] %>% na.omit(),
+                    A549_M = results_A549_M$gene_symbol[results_A549_M$direction=="Chr"] %>% na.omit(),
+                    HelaS3_I = results_HeLa_I$gene_symbol[results_HeLa_I$direction=="Chr"] %>% na.omit(),
+                    HelaS3_M = results_HeLa_M$gene_symbol[results_HeLa_M$direction=="Chr"] %>% na.omit())
+library(UpSetR)
+
+dir.create("figures/stringtie_merged")
+pdf("figures/stringtie_merged/upset_cheRNA.stringtie_merged.pdf",useDingbats = F)
+p <- UpSetR::upset(fromList(cheRNA_list),order.by = c("freq","degree"),decreasing=c(T,T)) %>% print()
+dev.off()
+
+
+# venn
+Venn.diagram2(x=list(A549_I_cheRNA = results_A549_I$gene_symbol[results_A549_I$direction=="Chr"] %>% na.omit(),
+                    A549_M_cheRNA = results_A549_M$gene_symbol[results_A549_M$direction=="Chr"] %>% na.omit()),filename = "figures/stringtie_merged/venn_A549.cheRNA.pdf")
+
+
+Venn.diagram2(x=list(HelaS3_I = results_HeLa_I$gene_symbol[results_HeLa_I$direction=="Chr"] %>% na.omit(),
+                    HelaS3_M = results_HeLa_M$gene_symbol[results_HeLa_M$direction=="Chr"] %>% na.omit()),filename = "figures/stringtie_merged/venn_HeLaS3.cheRNA.pdf")
+
+```
+
+
+
+
+
+
+```{r compare with genecode V33}
+
+
+results_GENECODE <- lapply(list(A549_I_GENECODE="A549_I",
+                                A549_M_GENECODE="A549_M",
+                                HeLa_I_GENECODE="Hela_I",
+                                HeLa_M_GENECODE="Hela_M"
+                                ), function(x){
+                                data <- data.table::fread(paste0("/Volumes/Seagate/CAR_back/hg38/result/deseq_merged/DESeqResult_",x,".gz")) %>% 
+                                  dplyr::filter(direction =="Chr")
+                                result <- data$gene_symbol %>% unique()
+                                })
+
+
+results_stringtie <- lapply(list(A549_I_stringtie="A549_I",
+                                A549_M_stringtie="A549_M",
+                                HeLa_I_stringtie="Hela_I",
+                                HeLa_M_stringtie="Hela_M"
+                                ), function(x){
+                                data <- data.table::fread(paste0("result/Stringtie_merged/DESeqResult_",x,".gz")) %>% 
+                                  dplyr::filter(direction =="Chr")
+                                result <- data$gene_symbol %>% unique()
+                                })
+
+
+list_DESEQ <- c(results_GENECODE,results_stringtie)
+
+
+pdf("figures/stringtie_merged/upset_genecode_stringtie.pdf")
+UpSetR::upset(data = UpSetR::fromList(list_DESEQ),order.by = c("freq","degree"),nsets = 8)
+dev.off()
+
+Venn.diagram2(x = list(GENECODE_I=list_DESEQ$A549_I_GENECODE,stringtie_I=list_DESEQ$A549_I_stringtie,
+                       GENECODE_M=list_DESEQ$A549_M_GENECODE,stringtie_M=list_DESEQ$A549_M_stringtie),
+              filename = "figures/stringtie_merged/Venn_compare_A549_genecode_stringtie.pdf",imagetype = "pdf"
+                )
+
+Venn.diagram2(x = list(GENECODE_I=list_DESEQ$HeLa_I_GENECODE,stringtie_I=list_DESEQ$A549_I_stringtie,
+                       GENECODE_M=list_DESEQ$HeLa_M_GENECODE,stringtie_M=list_DESEQ$HeLa_M_stringtie),
+              filename = "figures/stringtie_merged/Venn_compare_HeLa_genecode_stringtie.pdf",imagetype = "pdf"
+                )
+
+
+Venn.diagram2(x = list(GENECODE_I=list_DESEQ$A549_I_GENECODE,stringtie_I=list_DESEQ$A549_I_stringtie),
+              filename = "figures/stringtie_merged/Venn_compare_A549_I_genecode_stringtie.pdf",imagetype = "pdf"
+                )
+
+Venn.diagram2(x = list(GENECODE_M=list_DESEQ$A549_M_GENECODE,stringtie_M=list_DESEQ$A549_M_stringtie),
+              filename = "figures/stringtie_merged/Venn_compare_A549_M_genecode_stringtie.pdf",imagetype = "pdf"
+                )
+
+Venn.diagram2(x = list(GENECODE_I=list_DESEQ$A549_I_GENECODE,stringtie_I=list_DESEQ$A549_I_stringtie),
+              filename = "figures/stringtie_merged/Venn_compare_A549_I_genecode_stringtie.pdf",imagetype = "pdf"
+                )
+
+Venn.diagram2(x = list(GENECODE_I=list_DESEQ$HeLa_I_GENECODE,stringtie_I=list_DESEQ$HeLa_I_stringtie),
+              filename = "figures/stringtie_merged/Venn_compare_HeLa_I_genecode_stringtie.pdf",imagetype = "pdf"
+                )
+
+Venn.diagram2(x = list(GENECODE_A549_IM=intersect(x=list_DESEQ$A549_I_GENECODE,y=list_DESEQ$A549_M_GENECODE),
+                       stringtie_A549_IM=intersect(x=list_DESEQ$A549_I_stringtie,y=list_DESEQ$A549_M_stringtie)
+                       ),
+              filename = "figures/stringtie_merged/Venn_compare_A549_IM_genecode_stringtie.pdf",imagetype = "pdf"
+                )
+
+Venn.diagram2(x = list(GENECODE_HeLa_IM=intersect(x=list_DESEQ$HeLa_I_GENECODE,y=list_DESEQ$HeLa_M_GENECODE),
+                       stringtie_HeLa_IM=intersect(x=list_DESEQ$HeLa_I_stringtie,y=list_DESEQ$HeLa_M_stringtie)
+                       ),
+              filename = "figures/stringtie_merged/Venn_compare_HeLa_IM_genecode_stringtie.pdf",imagetype = "pdf"
+                )
+
+
+
+```
+
+
+
